@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react'
 import * as XLSX from 'xlsx'
 import { useNavigate } from 'react-router-dom'
 import { useToast } from '../contexts/ToastContext'
-import { db } from '../lib/firebase'
-import { collection, getDocs, query, where } from 'firebase/firestore'
 
 const LINE_OPTIONS = [
   { id: 'line1', label: 'Line 1' },
@@ -43,38 +41,14 @@ export default function ExportExcel() {
   useEffect(() => {
     async function fetchAllData() {
       try {
-        // Fetch locations
-        const locSnap = await getDocs(collection(db, 'locations'))
+        // Mocked for phase 1 - removed firebase dependencies
         const locMap = {}
-        locSnap.forEach(doc => {
-          locMap[doc.id] = doc.data().name
-        })
-
-        // Fetch valid components across all lines
-        const compQ = query(collection(db, 'components'), where('isDeleted', '==', false))
-        const compSnap = await getDocs(compQ)
-
         const compsByLine = { line1: [], line2: [], line3: [], line4: [] }
-        compSnap.forEach(doc => {
-          const data = doc.data()
-          if (compsByLine[data.line]) {
-            compsByLine[data.line].push(data)
-          }
-        })
-
-        // Sort each line array by createdAt ascending exactly like LinePage.jsx
-        Object.keys(compsByLine).forEach(line => {
-          compsByLine[line].sort((a, b) => {
-            const aTime = a.createdAt?.toMillis?.() || 0
-            const bTime = b.createdAt?.toMillis?.() || 0
-            return aTime - bTime
-          })
-        })
 
         setDataCache({ locations: locMap, componentsByLine: compsByLine })
       } catch (err) {
         console.error('Error fetching data for export:', err)
-        addToast('Gagal memuat data dari database', 'error')
+        addToast('Gagal memuat data', 'error')
       } finally {
         setIsLoading(false)
       }

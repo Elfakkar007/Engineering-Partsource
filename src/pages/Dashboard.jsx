@@ -1,10 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
-import { db } from '../lib/firebase'
-import { collection, doc, onSnapshot, query, where } from 'firebase/firestore'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
-
 /* ------------------------------------------------------------------ */
 /*  Constants & Pure Functions                                        */
 /* ------------------------------------------------------------------ */
@@ -283,43 +280,10 @@ export default function Dashboard() {
 
   // --- Realtime listeners ---
   useEffect(() => {
-    let loadedCount = 0
-    const checkDone = () => { if (++loadedCount >= 3) setIsLoading(false) }
-
-    const compQ = query(collection(db, 'components'), where('isDeleted', '==', false))
-    const unsubComp = onSnapshot(compQ, (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      setComponents(data)
-      checkDone()
-    }, (err) => {
-      console.error('Dashboard components listener error:', err)
-      checkDone()
-    })
-
-    const unsubLoc = onSnapshot(collection(db, 'locations'), (snap) => {
-      const locMap = {}
-      snap.docs.forEach(d => { locMap[d.id] = d.data() })
-      setLocations(locMap)
-      checkDone()
-    }, (err) => {
-      console.error('Dashboard locations listener error:', err)
-      checkDone()
-    })
-
-    const unsubGrid = onSnapshot(doc(db, 'settings', 'gridConfig'), (snap) => {
-      if (snap.exists()) {
-        const data = snap.data()
-        if (data.requiredColumns && data.requiredColumns.length > 0) {
-          setRequiredColumns(data.requiredColumns)
-        }
-      }
-      checkDone()
-    }, (err) => {
-      console.error('Dashboard gridConfig listener error:', err)
-      checkDone()
-    })
-
-    return () => { unsubComp(); unsubLoc(); unsubGrid() }
+    // Mocked for phase 1 - removed firebase dependencies
+    setComponents([])
+    setLocations({})
+    setIsLoading(false)
   }, [])
 
   // --- Derived data ---

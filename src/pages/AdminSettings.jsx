@@ -1,6 +1,4 @@
 import { useState, useEffect } from 'react'
-import { doc, setDoc, onSnapshot } from 'firebase/firestore'
-import { db } from '../lib/firebase'
 import { useToast } from '../contexts/ToastContext'
 import { COLUMNS } from './LinePage'
 import { useNavigate } from 'react-router-dom'
@@ -18,26 +16,12 @@ export default function AdminSettings() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    const docRef = doc(db, 'settings', 'gridConfig')
-    const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) {
-        setConfig({
-          requiredColumns: docSnap.data().requiredColumns || DEFAULT_REQUIRED,
-          hiddenColumns: docSnap.data().hiddenColumns || []
-        })
-      } else {
-        setConfig({
-          requiredColumns: DEFAULT_REQUIRED,
-          hiddenColumns: []
-        })
-      }
-      setLoading(false)
-    }, (error) => {
-      console.error('Error fetching gridConfig:', error)
-      addToast('Gagal memuat konfigurasi', 'error')
-      setLoading(false)
+    // Mocked for phase 1 - removed firebase dependencies
+    setConfig({
+      requiredColumns: DEFAULT_REQUIRED,
+      hiddenColumns: []
     })
-    return () => unsubscribe()
+    setLoading(false)
   }, [addToast])
 
   const handleToggleRequired = (colKey) => {
@@ -67,16 +51,12 @@ export default function AdminSettings() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      const docRef = doc(db, 'settings', 'gridConfig')
-      await setDoc(docRef, config, { merge: true })
+      // Mocked for phase 1 - removed firebase save
+      await new Promise(resolve => setTimeout(resolve, 500))
       addToast('Pengaturan grid berhasil disimpan', 'success')
     } catch (err) {
       console.error('Error saving gridConfig:', err)
-      if (err.code === 'permission-denied') {
-        addToast('Akses ditolak: Anda bukan Admin', 'error')
-      } else {
-        addToast('Gagal menyimpan pengaturan', 'error')
-      }
+      addToast('Gagal menyimpan pengaturan', 'error')
     } finally {
       setSaving(false)
     }

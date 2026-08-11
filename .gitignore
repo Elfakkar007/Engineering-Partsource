@@ -22,3 +22,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment & Local Secrets
+.env
+.env.local
+*.pem
+credentials.json
+
+# PocketBase local data (jika ditaruh di dalam proyek)
+pb_data/
+pb_migrations/

@@ -3,11 +3,28 @@ import { createPortal } from 'react-dom'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
-import {
-  collection, query, where, onSnapshot, getDocs,
-  addDoc, updateDoc, doc, setDoc, serverTimestamp, writeBatch, arrayUnion
-} from 'firebase/firestore'
-import { db } from '../lib/firebase'
+// MOCKS for Phase 1
+const collection = () => {}
+const query = () => {}
+const where = () => {}
+const onSnapshot = (q, cb) => {
+  cb({ docs: [] })
+  return () => {}
+}
+const getDocs = async () => ({ docs: [], size: 0, forEach: () => {} })
+const addDoc = async () => ({ id: 'mock-id' })
+const updateDoc = async () => {}
+const doc = () => {}
+const setDoc = async () => {}
+const serverTimestamp = () => new Date()
+const writeBatch = () => ({
+  set: () => {},
+  update: () => {},
+  delete: () => {},
+  commit: async () => {}
+})
+const arrayUnion = () => {}
+const db = {}
 import { logActivity } from '../lib/activityLog'
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal'
 

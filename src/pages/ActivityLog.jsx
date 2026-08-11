@@ -1,6 +1,4 @@
 import { useState, useEffect } from 'react'
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore'
-import { db } from '../lib/firebase'
 import { useNavigate } from 'react-router-dom'
 import { useToast } from '../contexts/ToastContext'
 
@@ -55,34 +53,10 @@ export default function ActivityLog() {
   }
 
   useEffect(() => {
-    const q = query(
-      collection(db, 'activityLog'),
-      orderBy('timestamp', 'desc'),
-      limit(200)
-    )
-
-    const unsubLogs = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
-      setLogs(data)
-      setLoading(false)
-    }, (error) => {
-      console.error('Error fetching activity log:', error)
-      addToast('Gagal memuat log aktivitas', 'error')
-      setLoading(false)
-    })
-
-    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-      const usersMap = {}
-      snapshot.docs.forEach(d => {
-        usersMap[d.id] = d.data()
-      })
-      setUsers(usersMap)
-    })
-
-    return () => {
-      unsubLogs()
-      unsubUsers()
-    }
+    // Mocked for phase 1 - removed firebase dependencies
+    setLogs([])
+    setUsers({})
+    setLoading(false)
   }, [addToast])
 
   const formatDate = (timestamp) => {

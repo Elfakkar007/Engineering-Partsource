@@ -1,6 +1,21 @@
 import { useState, useEffect } from 'react'
-import { collection, query, where, onSnapshot, updateDoc, doc, deleteDoc, writeBatch } from 'firebase/firestore'
-import { db } from '../lib/firebase'
+// MOCKS for Phase 1
+const collection = () => {}
+const query = () => {}
+const where = () => {}
+const onSnapshot = (q, cb) => {
+  cb({ docs: [] })
+  return () => {}
+}
+const updateDoc = async () => {}
+const doc = () => {}
+const deleteDoc = async () => {}
+const writeBatch = () => ({
+  update: () => {},
+  delete: () => {},
+  commit: async () => {}
+})
+const db = {}
 import { useToast } from '../contexts/ToastContext'
 import { useNavigate } from 'react-router-dom'
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal'

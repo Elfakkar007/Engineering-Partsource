@@ -4,8 +4,6 @@ import { useNavigate } from 'react-router-dom'
 import { useToast } from '../contexts/ToastContext'
 import { useImportUndo } from '../contexts/ImportUndoContext'
 import { useAuth } from '../contexts/AuthContext'
-import { db } from '../lib/firebase'
-import { collection, getDocs, writeBatch, doc, serverTimestamp } from 'firebase/firestore'
 import { logActivity } from '../lib/activityLog'
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal'
 
@@ -240,9 +238,8 @@ export default function ImportExcel() {
     setIsImporting(true)
     setImportProgress('Menghitung data lama...')
     try {
-      const compSnap = await getDocs(collection(db, 'components'))
-      const locSnap = await getDocs(collection(db, 'locations'))
-      setDeleteStats({ components: compSnap.size, locations: locSnap.size })
+      // Mocked for phase 1 - removed firebase dependencies
+      setDeleteStats({ components: 0, locations: 0 })
       setShowConfirm(true)
       setIsImporting(false)
       setImportProgress('')
@@ -260,166 +257,27 @@ export default function ImportExcel() {
     const batchId = `import_${Date.now()}`
 
     try {
-      // 1. Delete all existing data
-      setImportProgress(`Menghapus ${deleteStats.components} data baris lama...`)
-      const compSnap = await getDocs(collection(db, 'components'))
-      let batch = writeBatch(db)
-      let count = 0
+      // Mocked for phase 1 - removed firebase save
+      await new Promise(resolve => setTimeout(resolve, 1500))
 
-      for (const docSnap of compSnap.docs) {
-        batch.delete(docSnap.ref)
-        count++
-        if (count % 500 === 0) {
-          await batch.commit()
-          batch = writeBatch(db)
-        }
-      }
-      if (count % 500 !== 0) await batch.commit()
-
-      setImportProgress(`Menghapus ${deleteStats.locations} lokasi lama...`)
-      const locSnap = await getDocs(collection(db, 'locations'))
-      batch = writeBatch(db)
-      count = 0
-      for (const docSnap of locSnap.docs) {
-        batch.delete(docSnap.ref)
-        count++
-        if (count % 500 === 0) {
-          await batch.commit()
-          batch = writeBatch(db)
-        }
-      }
-      if (count % 500 !== 0) await batch.commit()
-
-      // 2. Prepare locations
-      setImportProgress('Membuat lokasi baru...')
-      const uniqueLocs = {} // { lineId: Set<string> }
-
-      const allRowsToInsert = []
-      sheetNames.forEach(sheet => {
-        const lineId = sheetMapping[sheet]
-        if (!lineId || !validationResults[sheet]) return
-
-        const processRow = (rowObj) => {
-          const locName = rowObj.data['Location']?.trim() || ''
-          if (!uniqueLocs[lineId]) uniqueLocs[lineId] = new Set()
-          uniqueLocs[lineId].add(locName)
-          allRowsToInsert.push({ lineId, data: rowObj.data })
-        }
-
-        validationResults[sheet].validRows.forEach(processRow)
-        validationResults[sheet].invalidRows.forEach(processRow)
-      })
-
-      const locMapping = {} // { lineId: { locName: locId } }
-      batch = writeBatch(db)
-      count = 0
-      let newLocCount = 0
-
-      for (const [lineId, locSet] of Object.entries(uniqueLocs)) {
-        locMapping[lineId] = {}
-        for (const locName of locSet) {
-          const displayLocName = locName === '' ? 'Belum Ada Lokasi' : locName
-          const baseSlug = displayLocName.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-          const locId = `${lineId}__${baseSlug}`
-
-          locMapping[lineId][locName] = locId
-
-          batch.set(doc(db, 'locations', locId), {
-            name: displayLocName,
-            line: lineId,
-            importBatchId: batchId,
-            createdBy: currentUser?.uid || '',
-            createdAt: serverTimestamp()
-          })
-          count++
-          newLocCount++
-
-          if (count % 500 === 0) {
-            await batch.commit()
-            batch = writeBatch(db)
-          }
-        }
-      }
-      if (count % 500 !== 0) await batch.commit()
-
-      // 3. Write new components
-      setImportProgress(`Menulis ${allRowsToInsert.length} baris data baru...`)
-      batch = writeBatch(db)
-      count = 0
-
-      for (const rowObj of allRowsToInsert) {
-        const { lineId, data } = rowObj
-        const locName = data['Location']?.trim() || ''
-        const locId = locMapping[lineId][locName]
-
-        const componentData = {
-          line: lineId,
-          locationId: locId,
-          importBatchId: batchId,
-          isDeleted: false,
-          createdBy: currentUser?.uid || '',
-          lastEditedBy: currentUser?.uid || '',
-          createdAt: serverTimestamp(),
-          lastUpdated: serverTimestamp()
-        }
-
-        const fieldMapping = {
-          'Sub-Machine': 'subMachine',
-          'Item Code': 'itemCode',
-          'Category': 'category',
-          'Part': 'part',
-          'Description ( Bella )': 'description',
-          'Spesification': 'spesification',
-          'Warehouse Name': 'warehouseName',
-          'Status': 'status',
-          'Foto': 'foto',
-          'Qty WH': 'qtyWh'
-        }
-
-        Object.entries(fieldMapping).forEach(([stdCol, key]) => {
-          componentData[key] = data[stdCol] || ''
-        })
-
-        const qtyVal = data['Qty']
-        if (qtyVal) {
-          const num = Number(qtyVal.replace(',', '.'))
-          if (!isNaN(num)) {
-            componentData['qty'] = num
-          } else {
-            componentData['qty'] = qtyVal // invalid string as is
-          }
-        } else {
-          componentData['qty'] = ''
-        }
-
-        batch.set(doc(collection(db, 'components')), componentData)
-        count++
-
-        if (count % 500 === 0) {
-          await batch.commit()
-          batch = writeBatch(db)
-        }
-      }
-      if (count % 500 !== 0) await batch.commit()
-
-      addToast(`Berhasil mengimpor ${allRowsToInsert.length} baris dan ${newLocCount} lokasi.`, 'success', {
+      addToast(`Berhasil mensimulasikan import baris dan lokasi.`, 'success', {
         duration: 15000,
         onUndo: () => {
-          requestUndo(batchId, allRowsToInsert.length, newLocCount)
+          requestUndo(batchId, 0, 0)
         }
       })
 
       logActivity('import_excel', currentUser?.uid, {
         importBatchId: batchId,
-        totalRows: allRowsToInsert.length,
-        totalLocations: newLocCount
+        totalRows: 0,
+        totalLocations: 0
       })
 
       cancelImport()
 
     } catch (err) {
       console.error(err)
-      addToast('Import terhenti di tengah jalan, sebagian data mungkin sudah berubah — hubungi developer sebelum lanjut', 'error')
+      addToast('Import gagal', 'error')
     } finally {
       setIsImporting(false)
       setImportProgress('')
