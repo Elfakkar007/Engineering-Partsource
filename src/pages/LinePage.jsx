@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
+import MainLayout from '../components/layout/MainLayout'
+import ThreeTierNav from '../components/navigation/ThreeTierNav'
 // MOCKS for Phase 1
 const collection = () => {}
 const query = () => {}
@@ -104,45 +106,7 @@ function extractDriveFileId(url) {
 }
 
 
-/* ------------------------------------------------------------------ */
-/*  SyncStatusBar (duplicated from Dashboard — extract later)         */
-/* ------------------------------------------------------------------ */
-function SyncStatusBar() {
-  const [isOnline, setIsOnline] = useState(navigator.onLine)
-
-  useEffect(() => {
-    const onOnline = () => setIsOnline(true)
-    const onOffline = () => setIsOnline(false)
-    window.addEventListener('online', onOnline)
-    window.addEventListener('offline', onOffline)
-    return () => {
-      window.removeEventListener('online', onOnline)
-      window.removeEventListener('offline', onOffline)
-    }
-  }, [])
-
-  return (
-    <div className={isOnline ? 'sync-bar sync-bar--online' : 'sync-bar sync-bar--offline'}>
-      {isOnline ? (
-        <>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 6L9 17l-5-5" />
-          </svg>
-          <span>Tersimpan • Online</span>
-        </>
-      ) : (
-        <>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          <span>Mode Offline • Tersimpan di perangkat, akan sinkron otomatis</span>
-        </>
-      )}
-    </div>
-  )
-}
+/* SyncStatusBar dihapus dari sini — sekarang disediakan oleh MainLayout */
 
 /* ------------------------------------------------------------------ */
 /*  EditableCell — the core inline-edit component                     */
@@ -1962,83 +1926,12 @@ export default function LinePage() {
   }
 
   return (
-    <div style={{ minHeight: '100svh', background: '#f8f9fa' }}>
-      {/* ---- Header ---- */}
-      <header style={{
-        background: '#ffffff',
-        borderBottom: '1px solid #dadce0',
-        position: 'sticky',
-        top: 0,
-        zIndex: 20,
-      }}>
-        <div style={{
-          maxWidth: '1400px',
-          margin: '0 auto',
-          padding: '0 16px',
-          height: '48px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}>
-          {/* Left: back + logo + title */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button
-              onClick={() => navigate('/')}
-              className="btn-secondary"
-              style={{
-                padding: '4px 10px',
-                fontSize: '13px',
-                color: '#5f6368',
-                gap: '4px',
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M19 12H5M12 19l-7-7 7-7" />
-              </svg>
-              Dashboard
-            </button>
-            <div style={{
-              width: '1px',
-              height: '24px',
-              background: '#dadce0',
-            }} />
-            <h1 style={{
-              margin: 0,
-              fontSize: '16px',
-              fontWeight: 600,
-              color: '#1f2328',
-              lineHeight: 1.3,
-            }}>
-              {lineName}
-            </h1>
-          </div>
-
-          {/* Right: user info + logout */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <div style={{ textAlign: 'right' }}>
-              <p style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#1f2328', lineHeight: 1.2 }}>
-                {currentUser?.displayName || currentUser?.email?.split('@')[0] || 'User'}
-              </p>
-              <p style={{ margin: 0, fontSize: '12px', color: '#5f6368', lineHeight: 1.3 }}>
-                {roleLabelMap[userRole] || userRole || 'User'}
-              </p>
-            </div>
-            <button
-              onClick={handleLogout}
-              className="btn-secondary"
-              style={{ padding: '6px 12px', fontSize: '13px', color: '#5f6368' }}
-            >
-              Keluar
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* ---- Sync Status Bar ---- */}
-      <SyncStatusBar />
+    <MainLayout>
+      {/* ---- 3-Tier Navigation (Breadcrumb + Dept Tabs + Location Tabs) ---- */}
+      <ThreeTierNav lineName={lineName} />
 
       {/* ---- Main Content ---- */}
-      <main style={{ maxWidth: '1400px', margin: '0 auto' }}>
+      <main style={{ flex: 1, overflow: 'auto' }}>
 
         {/* ---- Permission warning for wrong-line interns ---- */}
         {!canEdit && userRole === 'intern' && (
@@ -2677,6 +2570,6 @@ export default function LinePage() {
           />
         )}
       </main>
-    </div>
+    </MainLayout>
   )
 }
