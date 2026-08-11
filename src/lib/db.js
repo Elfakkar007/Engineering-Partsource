@@ -2,14 +2,44 @@ import Dexie from 'dexie'
 
 export const db = new Dexie('plant_sourcing_v2')
 
-// Skema tabel disesuaikan dengan instruksi prompt (dengan hierarchical cache)
+/**
+ * Schema v2.0 — Dynamic Config-Driven Engine
+ *
+ * Tabel utama:
+ *   columns_config     — definisi kolom dinamis per Department (jantung Schema Engine)
+ *   components         — baris data grid, `components` field berisi JSON key-value sesuai columns_config
+ *   sync_queue         — antrian operasi offline yang belum ter-push ke PocketBase
+ *   item_code_rules    — aturan generate kode material per Department
+ *   reference_catalog  — catalog referensi kode untuk Dual-Matching
+ *
+ * Cache hierarki (untuk kebutuhan offline):
+ *   lines_cache        — daftar Line dari PocketBase
+ *   departments_cache  — daftar Department dari PocketBase
+ *   locations_cache    — daftar Location dari PocketBase
+ */
 db.version(1).stores({
+  // columns_config: definisi kolom per department_id, urut by `order`
   columns_config: '++id, department_id, key, order',
-  components: '++id, location_id, department_id, sync_status',
-  sync_queue: '++id, action, payload, timestamp, status',
+
+  // components: baris data grid
+  // `components` field (JSON) menyimpan data sel sesuai columns_config aktif
+  // Contoh: { col_1: "Line 1", col_4: "15A1CPDAC001", col_14: 2 }
+  components: '++id, location_id, department_id, sync_status, isDeleted, lastUpdated',
+
+  // sync_queue: operasi CRUD yang antri untuk di-push ke PocketBase
+  // operation: 'create' | 'update' | 'delete'
+  // status: 'pending' | 'syncing' | 'failed'
+  sync_queue: '++id, entity_type, entity_id, operation, status, created_at, retry_count',
+
+  // item_code_rules: aturan generate kode per Department
   item_code_rules: '++id, department_id',
-  reference_catalog: '++id, department_id, specification',
+
+  // reference_catalog: catalog kode untuk matching otomatis
+  reference_catalog: '++id, department_id',
+
+  // Cache hierarki untuk kebutuhan offline-first
   lines_cache: 'id',
   departments_cache: 'id',
   locations_cache: 'id, line_id, department_id',
 })
+
