@@ -61,3 +61,20 @@ db.version(2).stores({
   import_batches: '++id, location_id, department_id, imported_at, status',
 })
 
+// Schema v3 — tambah tabel activity_log untuk audit trail lokal (SRS §5.2)
+db.version(3).stores({
+  columns_config: '++id, department_id, key, order',
+  components: '++id, location_id, department_id, import_batch_id, sync_status, isDeleted, lastUpdated',
+  sync_queue: '++id, entity_type, entity_id, operation, status, created_at, retry_count',
+  item_code_rules: '++id, department_id',
+  reference_catalog: '++id, department_id',
+  lines_cache: 'id',
+  departments_cache: 'id',
+  locations_cache: 'id, line_id, department_id',
+  import_batches: '++id, location_id, department_id, imported_at, status',
+
+  // NEW: activity_log — immutable audit trail lokal
+  // action: 'tambah_baris' | 'edit_sel' | 'hapus_baris' | 'import_excel' | 'ubah_skema' | dll
+  activity_log: '++id, user_id, action, entity_type, timestamp',
+})
+

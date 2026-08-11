@@ -6,7 +6,7 @@
 - [x] **Tahap 3: Hierarki Navigasi 3-Tier & Layout Global**
 - [x] **Tahap 4: Refactor Generic Dynamic Grid & Spreadsheet Tools**
 - [x] **Tahap 5: Dynamic Item Code Engine, Google Sheets Sync Queue, & Import/Export**
-- [ ] **Tahap 6: Admin Dashboard & Schema Manager**
+- [x] **Tahap 6: Admin Dashboard & Schema Manager**
 
 ---
 
@@ -61,4 +61,16 @@
   - *ExportModal* dibuat dengan format dan header 100% dinamis bersumber dari `columns_config`.
   - *ImportModal* 4-tahap (Wizard) ditambahkan, beserta auto-mapping *header-to-column* dan pratinjau data invalid.
   - `importUndo.js` diselesaikan melalui *transaction* Dexie yang mendelete (soft-delete) data pada `components` berdasarkan *Batch ID* (SRS §9.6).
-  - Toolbar `DataGrid.jsx` diperbarui dengan menyematkan komponen modal Export & Import.
+  - Toolbar `DataGrid.jsx` diperbarui dengan menyematkan komponen modal Export & Import.
+
+## Log Catatan Tahap 6
+- **Status**: Selesai & Build Validated (632 modules, 0 errors).
+- **Perubahan Utama**:
+  - `src/lib/db.js` diperbarui ke Schema v3 dengan tabel `activity_log` (audit trail lokal, append-only).
+  - `src/lib/activityLog.js` diimplementasikan penuh: menyimpan log ke Dexie dengan pruning otomatis di 500 entri.
+  - `src/components/admin/SchemaBuilder.jsx` dibuat — panel kelola skema kolom per Department (switcher, tabel kolom, edit inline, reorder ↑↓, toggle visibility, hapus dengan proteksi `is_ref_trigger`).
+  - `src/components/admin/HierarchyManager.jsx` dibuat — CRUD Line, Department, dan Location langsung ke Dexie cache.
+  - `src/components/admin/ItemCodeRuleManager.jsx` dibuat — Template Builder (chip insert kolom, preview live) dan Reference Catalog manager (cari, tambah, hapus entri).
+  - `src/components/admin/SyncMonitor.jsx` dibuat — statistik antrian sync, daftar entri, tombol "Sync Sekarang" & "Retry Gagal".
+  - `src/pages/AdminSettings.jsx` di-refactor total: sidebar tab nav (Skema Kolom, Hierarki, Aturan Kode, Sync Monitor), header hijau branded, tanpa kode hardcode v1.0.
+  - `src/pages/ActivityLog.jsx` di-refactor: baca dari `activity_log` Dexie via `useLiveQuery`, filter aksi/tipe, color badge per jenis aksi, paginasi.

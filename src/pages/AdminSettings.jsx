@@ -1,182 +1,154 @@
-import { useState, useEffect } from 'react'
-import { useToast } from '../contexts/ToastContext'
+/**
+ * AdminSettings.jsx — Refactor Total (Phase 6)
+ *
+ * Multi-tab Admin Panel berdasarkan SRS v2.0 & DESIGN_v2.md §5.
+ *
+ * Tab:
+ *   1. Schema Manager  — kelola kolom per Department via SchemaBuilder
+ *   2. Hierarki        — kelola Line / Department / Location
+ *   3. Aturan Kode     — template item code + reference catalog
+ *   4. Sync Monitor    — status antrian sync_queue + trigger manual
+ */
+
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
+import SchemaBuilder from '../components/admin/SchemaBuilder'
+import HierarchyManager from '../components/admin/HierarchyManager'
+import ItemCodeRuleManager from '../components/admin/ItemCodeRuleManager'
+import SyncMonitor from '../components/admin/SyncMonitor'
 
-export const DEFAULT_REQUIRED = ['subMachine', 'category', 'part', 'spesification', 'status', 'qty', 'foto']
-
-const COLUMNS = [
-  { key: 'subMachine', label: 'Sub-Machine' },
-  { key: 'itemCode', label: 'Item Code' },
-  { key: 'category', label: 'Category' },
-  { key: 'part', label: 'Part' },
-  { key: 'description', label: 'Description' },
-  { key: 'spesification', label: 'Spesification' },
-  { key: 'warehouseName', label: 'Warehouse Name' },
-  { key: 'status', label: 'Status' },
-  { key: 'qty', label: 'Qty' },
-  { key: 'foto', label: 'Foto' },
-  { key: 'qtyWh', label: 'Qty WH' },
+/* ------------------------------------------------------------------ */
+/*  Tab config                                                           */
+/* ------------------------------------------------------------------ */
+const TABS = [
+  {
+    id: 'schema',
+    label: 'Skema Kolom',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" />
+      </svg>
+    ),
+    desc: 'Tambah, edit, dan susun kolom data per Department.',
+  },
+  {
+    id: 'hierarchy',
+    label: 'Hierarki',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" />
+      </svg>
+    ),
+    desc: 'Kelola Line, Department, dan Location.',
+  },
+  {
+    id: 'itemcode',
+    label: 'Aturan Kode',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
+      </svg>
+    ),
+    desc: 'Template kode material dan catalog referensi.',
+  },
+  {
+    id: 'sync',
+    label: 'Sync Monitor',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+      </svg>
+    ),
+    desc: 'Monitor dan trigger sinkronisasi data ke PocketBase.',
+  },
 ]
 
+/* ------------------------------------------------------------------ */
+/*  Main Component                                                       */
+/* ------------------------------------------------------------------ */
 export default function AdminSettings() {
-  const [config, setConfig] = useState({
-    requiredColumns: DEFAULT_REQUIRED,
-    hiddenColumns: []
-  })
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const { addToast } = useToast()
   const navigate = useNavigate()
+  const { currentUser } = useAuth()
+  const [activeTab, setActiveTab] = useState('schema')
 
-  useEffect(() => {
-    // Mocked for phase 1 - removed firebase dependencies
-    setConfig({
-      requiredColumns: DEFAULT_REQUIRED,
-      hiddenColumns: []
-    })
-    setLoading(false)
-  }, [addToast])
-
-  const handleToggleRequired = (colKey) => {
-    setConfig(prev => {
-      const isReq = prev.requiredColumns.includes(colKey)
-      return {
-        ...prev,
-        requiredColumns: isReq 
-          ? prev.requiredColumns.filter(k => k !== colKey)
-          : [...prev.requiredColumns, colKey]
-      }
-    })
-  }
-
-  const handleToggleVisible = (colKey) => {
-    setConfig(prev => {
-      const isHidden = prev.hiddenColumns.includes(colKey)
-      return {
-        ...prev,
-        hiddenColumns: isHidden 
-          ? prev.hiddenColumns.filter(k => k !== colKey)
-          : [...prev.hiddenColumns, colKey]
-      }
-    })
-  }
-
-  const handleSave = async () => {
-    setSaving(true)
-    try {
-      // Mocked for phase 1 - removed firebase save
-      await new Promise(resolve => setTimeout(resolve, 500))
-      addToast('Pengaturan grid berhasil disimpan', 'success')
-    } catch (err) {
-      console.error('Error saving gridConfig:', err)
-      addToast('Gagal menyimpan pengaturan', 'error')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  if (loading) {
-    return (
-      <div style={{ padding: '48px', textAlign: 'center', color: '#5f6368' }}>
-        Memuat konfigurasi...
-      </div>
-    )
-  }
+  const userId = currentUser?.email || currentUser?.uid || ''
+  const activeTabDef = TABS.find(t => t.id === activeTab)
 
   return (
-    <div style={{ minHeight: '100svh', background: '#f8f9fa', paddingBottom: '48px' }}>
-      {/* Header */}
+    <div style={{ minHeight: '100svh', background: '#f8f9fa' }}>
+      {/* ---- Header ---- */}
       <header style={{
-        background: '#ffffff',
-        borderBottom: '1px solid #dadce0',
-        padding: '0 16px',
-        height: '48px',
-        display: 'flex',
-        alignItems: 'center',
-        position: 'sticky',
-        top: 0,
-        zIndex: 20,
+        background: '#188038', color: '#fff',
+        padding: '0 20px', height: '52px',
+        display: 'flex', alignItems: 'center', gap: '16px',
+        position: 'sticky', top: 0, zIndex: 30,
+        boxShadow: '0 1px 4px rgba(0,0,0,0.15)',
       }}>
-        <button 
-          onClick={() => navigate('/')} 
-          className="btn-secondary" 
-          style={{ padding: '6px 12px', marginRight: '16px', fontSize: '13px' }}
+        <button
+          onClick={() => navigate('/')}
+          style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', cursor: 'pointer', padding: '5px 12px', borderRadius: '6px', fontSize: '13px' }}
         >
-          &larr; Kembali ke Dashboard
+          ← Kembali
         </button>
-        <h1 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: '#1f2328' }}>
-          Pengaturan Admin
-        </h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07A10 10 0 0 1 4.93 4.93" />
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07M8.46 15.54a5 5 0 0 1 0-7.07" />
+          </svg>
+          <h1 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Panel Admin</h1>
+        </div>
+        {userId && (
+          <span style={{ fontSize: '12px', opacity: 0.85 }}>{userId}</span>
+        )}
       </header>
 
-      <main style={{ maxWidth: '800px', margin: '32px auto 0', padding: '0 16px' }}>
-        <div style={{ marginBottom: '24px' }}>
-          <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: '#1f2328' }}>
-            Konfigurasi Grid
-          </h2>
-          <p style={{ margin: '4px 0 0', fontSize: '14px', color: '#5f6368' }}>
-            Atur kolom mana yang menjadi syarat kelengkapan data (baris selesai), dan kolom mana yang ditampilkan di tabel.
-          </p>
-        </div>
+      <div style={{ display: 'flex', maxWidth: '1100px', margin: '0 auto', padding: '24px 16px', gap: '24px' }}>
+        {/* ---- Sidebar Tab Navigation ---- */}
+        <aside style={{ width: '200px', flexShrink: 0 }}>
+          <nav style={{ position: 'sticky', top: '76px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {TABS.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '10px',
+                  padding: '10px 14px', borderRadius: '8px', cursor: 'pointer',
+                  border: 'none', textAlign: 'left', width: '100%', fontSize: '13px',
+                  fontWeight: activeTab === tab.id ? 600 : 400,
+                  background: activeTab === tab.id ? '#e6f4ea' : 'transparent',
+                  color: activeTab === tab.id ? '#188038' : '#5f6368',
+                  transition: 'all 0.15s',
+                }}
+              >
+                <span style={{ opacity: activeTab === tab.id ? 1 : 0.6 }}>{tab.icon}</span>
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </aside>
 
-        <div className="ds-card" style={{ padding: '24px' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid #e8eaed' }}>
-                <th style={{ padding: '12px 8px', color: '#5f6368', fontWeight: 600, fontSize: '13px' }}>Nama Kolom</th>
-                <th style={{ padding: '12px 8px', color: '#5f6368', fontWeight: 600, fontSize: '13px', textAlign: 'center' }}>Syarat Selesai</th>
-                <th style={{ padding: '12px 8px', color: '#5f6368', fontWeight: 600, fontSize: '13px', textAlign: 'center' }}>Tampilkan di Grid</th>
-              </tr>
-            </thead>
-            <tbody>
-              {COLUMNS.map(col => {
-                const isRequired = config.requiredColumns.includes(col.key)
-                const isVisible = !config.hiddenColumns.includes(col.key)
-
-                return (
-                  <tr key={col.key} style={{ borderBottom: '1px solid #f1f3f4' }}>
-                    <td style={{ padding: '16px 8px', fontSize: '14px', fontWeight: 500, color: '#1f2328' }}>
-                      {col.label}
-                    </td>
-                    <td style={{ padding: '16px 8px', textAlign: 'center' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={isRequired}
-                        onChange={() => handleToggleRequired(col.key)}
-                        style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#1a73e8' }}
-                      />
-                    </td>
-                    <td style={{ padding: '16px 8px', textAlign: 'center' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={isVisible}
-                        onChange={() => handleToggleVisible(col.key)}
-                        style={{ 
-                          width: '18px', 
-                          height: '18px', 
-                          cursor: 'pointer',
-                          accentColor: '#1a73e8' 
-                        }}
-                      />
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-
-          <div style={{ marginTop: '32px', display: 'flex', justifyContent: 'flex-end', paddingTop: '16px', borderTop: '1px solid #e8eaed' }}>
-            <button 
-              className="btn-primary" 
-              onClick={handleSave} 
-              disabled={saving}
-              style={{ padding: '10px 24px', fontSize: '14px' }}
-            >
-              {saving ? 'Menyimpan...' : 'Simpan Perubahan'}
-            </button>
+        {/* ---- Main Content ---- */}
+        <main style={{ flex: 1, minWidth: 0 }}>
+          {/* Tab header */}
+          <div style={{ marginBottom: '20px' }}>
+            <h2 style={{ margin: '0 0 4px', fontSize: '18px', fontWeight: 700, color: '#1f2328' }}>
+              {activeTabDef?.label}
+            </h2>
+            <p style={{ margin: 0, fontSize: '13px', color: '#5f6368' }}>{activeTabDef?.desc}</p>
           </div>
-        </div>
-      </main>
+
+          {/* Tab panels */}
+          <div style={{ background: '#fff', borderRadius: '12px', padding: '24px', border: '1px solid #dadce0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+            {activeTab === 'schema'    && <SchemaBuilder userId={userId} />}
+            {activeTab === 'hierarchy' && <HierarchyManager userId={userId} />}
+            {activeTab === 'itemcode'  && <ItemCodeRuleManager />}
+            {activeTab === 'sync'      && <SyncMonitor />}
+          </div>
+        </main>
+      </div>
     </div>
   )
 }
