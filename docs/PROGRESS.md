@@ -4,7 +4,7 @@
 - [x] **Tahap 1: Pembersihan Firebase & Setup Infrastruktur (PocketBase + Dexie)**
 - [x] **Tahap 2: Dynamic Schema Engine & Local-First Sync Hook**
 - [x] **Tahap 3: Hierarki Navigasi 3-Tier & Layout Global**
-- [ ] **Tahap 4: Refactor Generic Dynamic Grid & Spreadsheet Tools**
+- [x] **Tahap 4: Refactor Generic Dynamic Grid & Spreadsheet Tools**
 - [ ] **Tahap 5: Dynamic Item Code Engine, Google Sheets Sync Queue, & Import/Export**
 
 ---
@@ -38,4 +38,14 @@
   - `src/components/navigation/ThreeTierNav.jsx` dibuat — wrapper breadcrumb + DepartmentTabs + LocationTabs.
   - `src/components/layout/MainLayout.jsx` dibuat — shell global (header hijau, SyncStatusBar, konten, UpdatePrompt).
   - `src/App.jsx` diperbarui: wiring `initSyncWorker()` & `seedAllDepartments()` async di AppShell, route 3-tier `/line/:lineId/:departmentId?/:locationId?`, NavigationProvider scoped ke LinePage.
-  - `src/pages/LinePage.jsx` diperbarui: inline header & SyncStatusBar lama dihapus, diganti `MainLayout` + `ThreeTierNav`.
+  - `src/pages/LinePage.jsx` diperbarui: inline header & SyncStatusBar lama dihapus, diganti `MainLayout` + `ThreeTierNav`.
+
+## Log Catatan Tahap 4
+- **Status**: Selesai & Build Validated (623 modules, 0 errors).
+- **Perubahan Utama**:
+  - `src/components/grid/GdrivePreview.jsx` dibuat — implementasi UI tipe kolom `gdrive_link` (foto) dengan *React Portal* (hover popover desktop & modal mobile).
+  - `src/components/grid/EditableCell.jsx` dibuat — type handler generik yang secara otomatis me-render *input*, *select*, *textarea*, atau *readonly* berdasarkan definisi `columns_config`.
+  - `src/components/grid/DataGrid.jsx` dibuat — Data table core engine yang *100% config-driven* dari hook `useDynamicSchema` dan `useGridData`. Termasuk fitur internal lengkap (*Find & Replace*, filter per kolom, row flag, undo).
+  - Implementasi aturan bisnis "Tidak Aktif" pada DataGrid: Pengecualian field wajib (seperti `qty`) untuk baris dengan status tidak aktif.
+  - `src/pages/LinePage.jsx` berhasil disederhanakan drastis dengan me-remove state table internal dan mengoper `locationName` & `canEdit` secara clean ke `<DataGrid />`.
+  - Fix stub import `COLUMNS` pada `AdminSettings.jsx` yang rusak akibat pembersihan data *hardcoded* di `LinePage`.

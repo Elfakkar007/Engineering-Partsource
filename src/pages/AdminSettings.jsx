@@ -1,9 +1,22 @@
 import { useState, useEffect } from 'react'
 import { useToast } from '../contexts/ToastContext'
-import { COLUMNS } from './LinePage'
 import { useNavigate } from 'react-router-dom'
 
 export const DEFAULT_REQUIRED = ['subMachine', 'category', 'part', 'spesification', 'status', 'qty', 'foto']
+
+const COLUMNS = [
+  { key: 'subMachine', label: 'Sub-Machine' },
+  { key: 'itemCode', label: 'Item Code' },
+  { key: 'category', label: 'Category' },
+  { key: 'part', label: 'Part' },
+  { key: 'description', label: 'Description' },
+  { key: 'spesification', label: 'Spesification' },
+  { key: 'warehouseName', label: 'Warehouse Name' },
+  { key: 'status', label: 'Status' },
+  { key: 'qty', label: 'Qty' },
+  { key: 'foto', label: 'Foto' },
+  { key: 'qtyWh', label: 'Qty WH' },
+]
 
 export default function AdminSettings() {
   const [config, setConfig] = useState({
