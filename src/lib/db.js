@@ -11,6 +11,7 @@ export const db = new Dexie('plant_sourcing_v2')
  *   sync_queue         — antrian operasi offline yang belum ter-push ke PocketBase
  *   item_code_rules    — aturan generate kode material per Department
  *   reference_catalog  — catalog referensi kode untuk Dual-Matching
+ *   import_batches     — record setiap import Excel untuk keperluan undo (SRS §9.6)
  *
  * Cache hierarki (untuk kebutuhan offline):
  *   lines_cache        — daftar Line dari PocketBase
@@ -41,5 +42,22 @@ db.version(1).stores({
   lines_cache: 'id',
   departments_cache: 'id',
   locations_cache: 'id, line_id, department_id',
+})
+
+// Schema v2 — tambah tabel import_batches untuk undo import (SRS §9.6)
+db.version(2).stores({
+  // Semua tabel lama tidak berubah (cukup listing ulang untuk migrasi bersih)
+  columns_config: '++id, department_id, key, order',
+  components: '++id, location_id, department_id, import_batch_id, sync_status, isDeleted, lastUpdated',
+  sync_queue: '++id, entity_type, entity_id, operation, status, created_at, retry_count',
+  item_code_rules: '++id, department_id',
+  reference_catalog: '++id, department_id',
+  lines_cache: 'id',
+  departments_cache: 'id',
+  locations_cache: 'id, line_id, department_id',
+
+  // NEW: tabel import_batches untuk mencatat setiap sesi import Excel
+  // status: 'committed' | 'undone'
+  import_batches: '++id, location_id, department_id, imported_at, status',
 })
 

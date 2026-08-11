@@ -25,6 +25,8 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../lib/db'
 import { triggerSync } from '../lib/syncWorker'
+import { matchReferenceCode, generateItemCode } from '../lib/itemCodeEngine'
+import { enqueueSheetSync } from '../lib/sheetsSync'
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                             */
@@ -184,14 +186,17 @@ export function useGridData(locationId, departmentId) {
 
   /**
    * Update nilai satu sel (satu key dalam `components` JSON).
+   * Jika kolom memiliki is_ref_trigger=true, jalankan Reference Catalog Matching.
+   * Jika tidak ada match di catalog, generate item code dari template rule.
    * Atomik: update Dexie + daftarkan ke sync_queue bersamaan.
    *
    * @param {number} rowId       - Dexie local ID baris
    * @param {string} colKey      - key kolom (mis. 'col_11')
    * @param {*}      value       - nilai baru
    * @param {string} [editedBy]  - user ID/email
+   * @param {Object} [colMeta]   - metadata kolom dari columns_config (opsional, untuk ref_trigger check)
    */
-  async function updateCell(rowId, colKey, value, editedBy = '') {
+  async function updateCell(rowId, colKey, value, editedBy = '', colMeta = null) {
     const now = nowISO()
 
     await db.transaction('rw', [db.components, db.sync_queue], async () => {
@@ -199,7 +204,43 @@ export function useGridData(locationId, departmentId) {
       const row = await db.components.get(rowId)
       if (!row) throw new Error(`Baris dengan ID ${rowId} tidak ditemukan`)
 
-      const updatedComponents = { ...row.components, [colKey]: value }
+      let updatedComponents = { ...row.components, [colKey]: value }
+
+      // ---- Item Code Engine: ref_trigger check ----
+      // Jalankan matching jika kolom ini bertanda is_ref_trigger=true
+      const isRefTrigger = colMeta?.is_ref_trigger === true
+      if (isRefTrigger && value) {
+        try {
+          const matchResult = await matchReferenceCode(colKey, value, row.department_id)
+          if (matchResult.matched && matchResult.item_code) {
+            // Temukan target_column_key dari item_code_rules department ini
+            const rule = await db.item_code_rules
+              .where('department_id').equals(row.department_id).first()
+            const targetKey = rule?.target_column_key
+            if (targetKey && targetKey !== colKey) {
+              // Auto-fill kolom kode material (is_auto: true)
+              updatedComponents = { ...updatedComponents, [targetKey]: matchResult.item_code }
+            }
+          } else if (!matchResult.matched) {
+            // Tidak ada match di catalog → generate kode baru dari template
+            const generatedCode = await generateItemCode(
+              { ...row, components: updatedComponents },
+              row.department_id
+            )
+            if (generatedCode) {
+              const rule = await db.item_code_rules
+                .where('department_id').equals(row.department_id).first()
+              const targetKey = rule?.target_column_key
+              if (targetKey && !updatedComponents[targetKey]) {
+                updatedComponents = { ...updatedComponents, [targetKey]: generatedCode }
+              }
+            }
+          }
+        } catch (engineErr) {
+          // Engine error tidak boleh menghentikan save
+          console.warn('[useGridData] itemCodeEngine error (non-blocking):', engineErr)
+        }
+      }
 
       // Update Dexie
       await db.components.update(rowId, {
@@ -220,6 +261,14 @@ export function useGridData(locationId, departmentId) {
         lastUpdated: now,
       }
       await db.sync_queue.add(makeSyncEntry('update', rowId, payload, row.pb_id))
+    })
+
+    // Enqueue ke Sheets sync (fire-and-forget)
+    enqueueSheetSync({
+      operation: 'update',
+      entity_id: rowId,
+      department_id: departmentId,
+      location_id: locationId,
     })
 
     triggerSync()
@@ -374,6 +423,55 @@ export function useGridData(locationId, departmentId) {
     triggerSync()
   }
 
+  /* ------------------------------------------------------------------ */
+  /*  BULK INSERT — import dari Excel (dengan batch tracking)             */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Insert banyak baris sekaligus dari hasil import Excel.
+   * Setiap baris ditandai dengan import_batch_id untuk keperluan undo.
+   *
+   * @param {Object[]} componentsList  - array of components objects { col_key: value }
+   * @param {number}   importBatchId   - ID dari import_batches
+   * @param {string}   [createdBy]
+   * @returns {Promise<number[]>}  array Dexie ID baris baru
+   */
+  async function bulkInsertRows(componentsList, importBatchId, createdBy = '') {
+    if (!locationId || !departmentId) throw new Error('locationId dan departmentId diperlukan')
+    if (!componentsList?.length) return []
+
+    const now = nowISO()
+    const newIds = []
+
+    await db.transaction('rw', [db.components, db.sync_queue], async () => {
+      for (const comps of componentsList) {
+        const row = {
+          location_id: locationId,
+          department_id: departmentId,
+          pb_id: null,
+          components: comps || {},
+          status_completeness: false,
+          flag: null,
+          flag_note: null,
+          isDeleted: false,
+          deletedAt: null,
+          import_batch_id: importBatchId,
+          created_by: createdBy,
+          last_edited_by: createdBy,
+          created_at: now,
+          lastUpdated: now,
+          sync_status: 'pending',
+        }
+        const id = await db.components.add(row)
+        newIds.push(id)
+        await db.sync_queue.add(makeSyncEntry('create', id, { ...row, id }))
+      }
+    })
+
+    triggerSync()
+    return newIds
+  }
+
   return {
     rows: rows || [],
     isLoading: rows === undefined,
@@ -384,5 +482,6 @@ export function useGridData(locationId, departmentId) {
     deleteRow,
     bulkDeleteRows,
     bulkFillColumn,
+    bulkInsertRows,
   }
 }

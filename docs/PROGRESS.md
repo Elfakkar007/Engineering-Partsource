@@ -5,7 +5,8 @@
 - [x] **Tahap 2: Dynamic Schema Engine & Local-First Sync Hook**
 - [x] **Tahap 3: Hierarki Navigasi 3-Tier & Layout Global**
 - [x] **Tahap 4: Refactor Generic Dynamic Grid & Spreadsheet Tools**
-- [ ] **Tahap 5: Dynamic Item Code Engine, Google Sheets Sync Queue, & Import/Export**
+- [x] **Tahap 5: Dynamic Item Code Engine, Google Sheets Sync Queue, & Import/Export**
+- [ ] **Tahap 6: Admin Dashboard & Schema Manager**
 
 ---
 
@@ -49,3 +50,15 @@
   - Implementasi aturan bisnis "Tidak Aktif" pada DataGrid: Pengecualian field wajib (seperti `qty`) untuk baris dengan status tidak aktif.
   - `src/pages/LinePage.jsx` berhasil disederhanakan drastis dengan me-remove state table internal dan mengoper `locationName` & `canEdit` secara clean ke `<DataGrid />`.
   - Fix stub import `COLUMNS` pada `AdminSettings.jsx` yang rusak akibat pembersihan data *hardcoded* di `LinePage`.
+
+## Log Catatan Tahap 5
+- **Status**: Selesai & Build Validated (628 modules, 0 errors).
+- **Perubahan Utama**:
+  - Tabel `import_batches` ditambahkan ke `db.js` (Schema v2) untuk menyimpan jejak data impor Excel.
+  - `itemCodeEngine.js` dibuat untuk logika *Reference Catalog Matching* otomatis dan pemformatan *Item Code* berdasarkan *Rule/Template* (SRS §7). Hook `useGridData.js` terhubung dengan mulus untuk menjalankan auto-fill.
+  - `sheetsSync.js` diimplementasikan dengan *debounce queue* untuk pengiriman data secara asynchronous via *webhook Google Apps Script* tanpa menyentuh *client API* Google Sheets (SRS §8).
+  - Integrasi pustaka *SheetJS* (xlsx) untuk engine *Import/Export* (`excelEngine.js`).
+  - *ExportModal* dibuat dengan format dan header 100% dinamis bersumber dari `columns_config`.
+  - *ImportModal* 4-tahap (Wizard) ditambahkan, beserta auto-mapping *header-to-column* dan pratinjau data invalid.
+  - `importUndo.js` diselesaikan melalui *transaction* Dexie yang mendelete (soft-delete) data pada `components` berdasarkan *Batch ID* (SRS §9.6).
+  - Toolbar `DataGrid.jsx` diperbarui dengan menyematkan komponen modal Export & Import.

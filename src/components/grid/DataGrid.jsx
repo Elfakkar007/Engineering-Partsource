@@ -27,6 +27,8 @@ import { useToast } from '../../contexts/ToastContext'
 import { logActivity } from '../../lib/activityLog'
 import EditableCell from './EditableCell'
 import ConfirmDeleteModal from '../ConfirmDeleteModal'
+import ExportModal from './ExportModal'
+import ImportModal from './ImportModal'
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                            */
@@ -398,6 +400,9 @@ export default function DataGrid({ locationName, canEdit }) {
   const [showFindReplaceModal, setShowFindReplaceModal] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteTargetIds, setDeleteTargetIds] = useState([])
+  
+  const [showExportModal, setShowExportModal] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
 
   // Undo (in-memory, loses on refresh)
   const [undoStack, setUndoStack] = useState([])
@@ -672,6 +677,29 @@ export default function DataGrid({ locationName, canEdit }) {
           </button>
         )}
 
+        {/* Import / Export */}
+        <div style={{ width: '1px', height: '20px', background: '#dadce0', margin: '0 4px' }} />
+        {canEdit && (
+          <button id="dg-import" className="btn-secondary" style={{ padding: '5px 12px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}
+            onClick={() => setShowImportModal(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            Import
+          </button>
+        )}
+        <button id="dg-export" className="btn-secondary" style={{ padding: '5px 12px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}
+          onClick={() => setShowExportModal(true)}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Export
+        </button>
+
         {/* Active filter indicator */}
         {activeFilters > 0 && (
           <button className="btn-secondary"
@@ -898,6 +926,35 @@ export default function DataGrid({ locationName, canEdit }) {
           confirmText={`Hapus ${deleteTargetIds.length} Baris`}
           onConfirm={handleDelete}
           onCancel={() => { setShowDeleteModal(false); setDeleteTargetIds([]) }}
+        />
+      )}
+
+      {showExportModal && (
+        <ExportModal
+          allRows={rows}
+          filteredRows={filteredRows}
+          selectedRows={selectedRows}
+          columns={columns}
+          locationName={locationName}
+          deptName={activeDepartmentId}
+          onClose={() => setShowExportModal(false)}
+        />
+      )}
+
+      {showImportModal && canEdit && (
+        <ImportModal
+          columns={columns}
+          bulkInsertRows={bulkInsertRows}
+          locationId={activeLocationId}
+          departmentId={activeDepartmentId}
+          locationName={locationName}
+          deptName={activeDepartmentId}
+          userId={userId}
+          onClose={() => setShowImportModal(false)}
+          onImported={({ batchId, rowCount }) => {
+            addToast(`${rowCount} baris berhasil diimpor.`, 'success')
+            setShowImportModal(false)
+          }}
         />
       )}
     </div>
