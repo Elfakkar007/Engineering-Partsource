@@ -1,4 +1,14 @@
-import { useEffect } from 'react'
+/**
+ * App.jsx — Phase 7 Final Polish
+ *
+ * Perubahan dari Phase 1-6:
+ *   - AuthProvider sekarang riil (PocketBase, bukan mock)
+ *   - AdminRoute + PrivateRoute pakai loading state agar tidak flash redirect
+ *   - UpdatePrompt disertakan di App shell agar tampil di semua halaman
+ *   - NavigationProvider dipindah ke dalam AppShell agar semua halaman bisa akses
+ */
+
+import { useEffect, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { ToastProvider } from './contexts/ToastContext'
@@ -6,33 +16,73 @@ import { ImportUndoProvider } from './contexts/ImportUndoContext'
 import { NavigationProvider } from './contexts/NavigationContext'
 import { initSyncWorker } from './lib/syncWorker'
 import { seedAllDepartments } from './data/initialSeeds'
+import UpdatePrompt from './components/common/UpdatePrompt'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import LinePage from './pages/LinePage'
-import AdminSettings from './pages/AdminSettings'
-import RecycleBin from './pages/RecycleBin'
-import ActivityLog from './pages/ActivityLog'
-import ImportExcel from './pages/ImportExcel'
-import ExportExcel from './pages/ExportExcel'
+
+// Lazy-load halaman berat (Admin, Excel I/O, RecycleBin) — code splitting
+const AdminSettings  = lazy(() => import('./pages/AdminSettings'))
+const RecycleBin     = lazy(() => import('./pages/RecycleBin'))
+const ActivityLog    = lazy(() => import('./pages/ActivityLog'))
+const ImportExcel    = lazy(() => import('./pages/ImportExcel'))
+const ExportExcel    = lazy(() => import('./pages/ExportExcel'))
+
+// Fallback saat lazy chunk sedang dimuat
+function PageLoader() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100dvh' }}>
+      <div style={{ width: '28px', height: '28px', border: '3px solid #e6f4ea', borderTop: '3px solid #188038', borderRadius: '50%', animation: 'spin 0.9s linear infinite' }} />
+    </div>
+  )
+}
 
 /* ------------------------------------------------------------------ */
-/*  Route guards                                                        */
+/*  Route Guards — respek loading state agar tidak flash redirect       */
 /* ------------------------------------------------------------------ */
 function AdminRoute({ children }) {
-  const { currentUser, userRole } = useAuth()
-  if (!currentUser) return <Navigate to="/login" />
-  if (userRole !== 'admin') return <Navigate to="/" />
+  const { currentUser, userRole, loading } = useAuth()
+  if (loading) return null                          // tunggu auth resolve
+  if (!currentUser) return <Navigate to="/login" replace />
+  if (userRole !== 'admin') return <Navigate to="/" replace />
   return children
 }
 
 function PrivateRoute({ children }) {
-  const { currentUser } = useAuth()
-  return currentUser ? children : <Navigate to="/login" />
+  const { currentUser, loading } = useAuth()
+  if (loading) return null
+  return currentUser ? children : <Navigate to="/login" replace />
 }
 
 function PublicRoute({ children }) {
-  const { currentUser } = useAuth()
-  return currentUser ? <Navigate to="/" /> : children
+  const { currentUser, loading } = useAuth()
+  if (loading) return null
+  return currentUser ? <Navigate to="/" replace /> : children
+}
+
+/* ------------------------------------------------------------------ */
+/*  Loading Spinner — tampil selama AuthProvider memverifikasi token    */
+/* ------------------------------------------------------------------ */
+function AuthLoadingScreen() {
+  const { loading } = useAuth()
+  if (!loading) return null
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: '#fff',
+    }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{
+          width: '36px', height: '36px', borderRadius: '50%',
+          border: '3px solid #e6f4ea', borderTop: '3px solid #188038',
+          animation: 'spin 0.9s linear infinite',
+          margin: '0 auto 16px',
+        }} />
+        <p style={{ fontSize: '13px', color: '#5f6368', margin: 0 }}>Memverifikasi sesi...</p>
+      </div>
+    </div>
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -40,15 +90,10 @@ function PublicRoute({ children }) {
 /* ------------------------------------------------------------------ */
 function AppShell({ children }) {
   useEffect(() => {
-    // 1. Inisialisasi Background Sync Worker (attach event listeners + interval)
+    // 1. Inisialisasi Background Sync Worker
     const cleanupSync = initSyncWorker()
 
-    // 2. Seed data Department awal secara async — tidak memblokir render
-    //    Idempotent: tidak melakukan apa-apa jika data sudah ada (SRS §14)
-    //    Gunakan ID placeholder; Phase 3 belum ada PocketBase ID nyata —
-    //    seed hanya dijalankan jika ada ID yang valid dari NavigationContext/cache.
-    //    Untuk tahap ini, seed dummy dept IDs agar tabel columns_config
-    //    terisi dan dapat diuji secara lokal.
+    // 2. Seed data Department awal — idempotent, tidak memblokir render
     const runSeed = async () => {
       try {
         await seedAllDepartments({
@@ -56,7 +101,6 @@ function AppShell({ children }) {
           elektrik: 'dept_elektrik',
         })
       } catch (err) {
-        // Seed gagal tidak memblokir aplikasi
         console.warn('[App] seedAllDepartments warning:', err)
       }
     }
@@ -65,7 +109,13 @@ function AppShell({ children }) {
     return cleanupSync
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  return children
+  return (
+    <>
+      {children}
+      {/* PWA Update Prompt — tampil di atas semua halaman saat ada versi baru */}
+      <UpdatePrompt />
+    </>
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -78,6 +128,7 @@ function App() {
         <AuthProvider>
           <ImportUndoProvider>
             <AppShell>
+              <AuthLoadingScreen />
               <Routes>
                 {/* Public */}
                 <Route
@@ -90,9 +141,16 @@ function App() {
                 />
 
                 {/* Dashboard — Tier 1 (pilih Line) */}
-                <Route path="/" element={<Dashboard />} />
+                <Route
+                  path="/"
+                  element={
+                    <PrivateRoute>
+                      <Dashboard />
+                    </PrivateRoute>
+                  }
+                />
 
-                {/* LinePage — Tier 2+3, URL: /line/:lineId/:departmentId?/:locationId? */}
+                {/* LinePage — Tier 2+3 — NavigationProvider di sini karena pakai useParams */}
                 <Route
                   path="/line/:lineId"
                   element={
@@ -124,12 +182,14 @@ function App() {
                   }
                 />
 
-                {/* Admin routes */}
+                {/* Admin routes — lazy loaded, wrapped in Suspense */}
                 <Route
                   path="/admin/settings"
                   element={
                     <AdminRoute>
-                      <AdminSettings />
+                      <Suspense fallback={<PageLoader />}>
+                        <AdminSettings />
+                      </Suspense>
                     </AdminRoute>
                   }
                 />
@@ -137,7 +197,9 @@ function App() {
                   path="/admin/recycle-bin"
                   element={
                     <AdminRoute>
-                      <RecycleBin />
+                      <Suspense fallback={<PageLoader />}>
+                        <RecycleBin />
+                      </Suspense>
                     </AdminRoute>
                   }
                 />
@@ -145,7 +207,9 @@ function App() {
                   path="/admin/activity-log"
                   element={
                     <AdminRoute>
-                      <ActivityLog />
+                      <Suspense fallback={<PageLoader />}>
+                        <ActivityLog />
+                      </Suspense>
                     </AdminRoute>
                   }
                 />
@@ -153,7 +217,9 @@ function App() {
                   path="/admin/import"
                   element={
                     <AdminRoute>
-                      <ImportExcel />
+                      <Suspense fallback={<PageLoader />}>
+                        <ImportExcel />
+                      </Suspense>
                     </AdminRoute>
                   }
                 />
@@ -161,12 +227,14 @@ function App() {
                   path="/admin/export"
                   element={
                     <AdminRoute>
-                      <ExportExcel />
+                      <Suspense fallback={<PageLoader />}>
+                        <ExportExcel />
+                      </Suspense>
                     </AdminRoute>
                   }
                 />
 
-                <Route path="*" element={<Navigate to="/" />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </AppShell>
           </ImportUndoProvider>

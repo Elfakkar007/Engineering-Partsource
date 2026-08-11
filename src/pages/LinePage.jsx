@@ -29,9 +29,11 @@ export default function LinePage() {
   const { currentUser, userRole } = useAuth()
   const { locations, activeLocationId } = useNavigation()
 
-  // Permission check
+  // Permission check — baca dari AuthContext (Phase 7: RBAC real)
+  const { canEdit, isAdmin } = useAuth()
+  // Jika staff dengan assigned line tertentu, batasi ke line mereka
   const userLineId = getUserLineId(currentUser?.assignedLine)
-  const canEdit = userRole === 'admin' || (userRole === 'intern' && userLineId === lineId)
+  const effectiveCanEdit = canEdit && (isAdmin || !userLineId || userLineId === lineId)
 
   const lineName = formatLineName(lineId)
   const activeLocation = locations?.find(l => l.id === activeLocationId)
@@ -45,8 +47,8 @@ export default function LinePage() {
       {/* ---- Main Content ---- */}
       <main style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
 
-        {/* ---- Permission warning for wrong-line interns ---- */}
-        {!canEdit && userRole === 'intern' && (
+        {/* ---- Permission warning for staff restricted to another line ---- */}
+        {!effectiveCanEdit && canEdit && userLineId && userLineId !== lineId && (
           <div className="permission-banner">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10" />
@@ -60,7 +62,7 @@ export default function LinePage() {
           </div>
         )}
 
-        <DataGrid locationName={activeLocationName} canEdit={canEdit} />
+        <DataGrid locationName={activeLocationName} canEdit={effectiveCanEdit} />
       </main>
     </MainLayout>
   )

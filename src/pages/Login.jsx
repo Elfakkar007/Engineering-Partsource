@@ -20,18 +20,8 @@ export default function Login() {
       await login(email, password)
       navigate('/')
     } catch (err) {
-      console.error('Login error:', err)
-      if (err.code === 'auth/invalid-credential') {
-        setError('Email atau password salah')
-      } else if (err.code === 'auth/user-not-found') {
-        setError('Akun tidak ditemukan')
-      } else if (err.code === 'auth/wrong-password') {
-        setError('Password salah')
-      } else if (err.code === 'auth/too-many-requests') {
-        setError('Terlalu banyak percobaan. Coba lagi nanti.')
-      } else {
-        setError('Gagal login. Periksa koneksi internet Anda.')
-      }
+      // AuthContext.login() sudah memformat pesan error yang ramah
+      setError(err.message || 'Gagal login. Periksa email dan password Anda.')
     } finally {
       setLoading(false)
     }

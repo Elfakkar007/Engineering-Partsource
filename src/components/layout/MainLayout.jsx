@@ -20,7 +20,7 @@ import UpdatePrompt from '../common/UpdatePrompt'
 /*  Header                                                              */
 /* ------------------------------------------------------------------ */
 function AppHeader() {
-  const { currentUser, userRole, logout } = useAuth()
+  const { currentUser, isAdmin, logout } = useAuth()
   const navigate = useNavigate()
 
   async function handleLogout() {
@@ -69,8 +69,8 @@ function AppHeader() {
 
       {/* Right side: user info + admin links + logout */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        {/* Admin links */}
-        {userRole === 'admin' && (
+        {/* Admin links — hanya tampil untuk role admin (RBAC) */}
+        {isAdmin && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Link
               to="/admin/settings"
@@ -109,7 +109,7 @@ function AppHeader() {
           </div>
         )}
 
-        {/* User name */}
+        {/* User name / email */}
         {currentUser && (
           <span style={{
             fontSize: '12px',
@@ -120,7 +120,7 @@ function AppHeader() {
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
           }}>
-            {currentUser.email}
+            {currentUser.name || currentUser.email}
           </span>
         )}
 

@@ -7,6 +7,7 @@
 - [x] **Tahap 4: Refactor Generic Dynamic Grid & Spreadsheet Tools**
 - [x] **Tahap 5: Dynamic Item Code Engine, Google Sheets Sync Queue, & Import/Export**
 - [x] **Tahap 6: Admin Dashboard & Schema Manager**
+- [x] **Tahap 7 (Final): PocketBase Auth, RBAC, PWA Offline, & Production Polish**
 
 ---
 
@@ -74,3 +75,44 @@
   - `src/components/admin/SyncMonitor.jsx` dibuat — statistik antrian sync, daftar entri, tombol "Sync Sekarang" & "Retry Gagal".
   - `src/pages/AdminSettings.jsx` di-refactor total: sidebar tab nav (Skema Kolom, Hierarki, Aturan Kode, Sync Monitor), header hijau branded, tanpa kode hardcode v1.0.
   - `src/pages/ActivityLog.jsx` di-refactor: baca dari `activity_log` Dexie via `useLiveQuery`, filter aksi/tipe, color badge per jenis aksi, paginasi.
+
+## Log Catatan Tahap 7 (Final)
+- **Status**: SELESAI — Build Production Validated. 0 errors. Code splitting aktif.
+- **Perubahan Utama**:
+  - `AuthContext.jsx` di-refactor total dari Mock ke PocketBase riil:
+    - Login via `pb.collection('users').authWithPassword()`.
+    - Auto-login dari `localStorage` token (`pb.authStore.isValid`) + auto-refresh saat online.
+    - *Fallback Offline Auth*: jika offline, gunakan cached profile dari `localStorage`.
+    - Role dibaca dari field `role` di PocketBase record user (`admin` | `staff` | `viewer`).
+    - Helper `isAdmin`, `canEdit`, `canAdmin` tersedia di semua komponen.
+  - `Login.jsx` diperbarui: error handling dikembalikan dari `AuthContext.login()` langsung.
+  - `App.jsx` diperbarui:
+    - Route guards (`AdminRoute`, `PrivateRoute`, `PublicRoute`) kini menunggu `loading` selesai sebelum redirect (mencegah flash).
+    - `AuthLoadingScreen` ditambahkan untuk animasi saat verifikasi token sesi.
+    - `UpdatePrompt` dipasang di `AppShell` agar tampil global di semua halaman.
+    - Admin routes di-*lazy-load* dengan `React.lazy()` + `<Suspense>` untuk code splitting.
+  - `MainLayout.jsx` diperbarui: gunakan `isAdmin` dari AuthContext, tampilkan `name` user (bukan email).
+  - `LinePage.jsx` diperbarui: RBAC `effectiveCanEdit` dari AuthContext (bukan hardcode role string).
+  - `vite.config.js` dikonfigurasi *manual chunk splitting*:
+    - `vendor-xlsx` (421 KB) — SheetJS, dimuat on-demand.
+    - `vendor-dexie` (104 KB) — IndexedDB ORM.
+    - `vendor-pocketbase` (38 KB) — PocketBase SDK.
+    - `vendor-react` (226 KB) — React + ReactDOM.
+    - `vendor-router` — React Router.
+    - `vendor-pwa` — Workbox runtime.
+    - Halaman admin terpisah: `AdminSettings`, `ActivityLog`, `RecycleBin`, `ImportExcel`, `ExportExcel`.
+  - Peringatan chunk > 500KB **sudah dieliminasi** sepenuhnya melalui `manualChunks`.
+  - PWA Workbox dikonfigurasi `runtimeCaching` untuk Google Fonts (CacheFirst strategy).
+
+---
+
+## Catatan Deployment (PocketBase Setup)
+# Jalankan PocketBase:
+pocketbase serve --http="0.0.0.0:8090"
+
+# Collection yang dibutuhkan di PocketBase:
+# - users (bawaan) → tambah field `role` (select: admin, staff, viewer)
+#                  → tambah field `name` (text)
+
+# .env untuk produksi:
+VITE_POCKETBASE_URL=http://[IP_SERVER_LOKAL]:8090
