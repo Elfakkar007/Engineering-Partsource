@@ -1,13 +1,14 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
-/* ------------------------------------------------------------------ */
-/*  Constants & Pure Functions                                        */
-/* ------------------------------------------------------------------ */
+import { db } from '../lib/db'
+import { evaluateRowCompleteness } from '../hooks/useRowCompleteness'
 
-const LINE_IDS = ['line1', 'line2', 'line3', 'line4']
-const LINE_LABELS = { line1: 'Line 1', line2: 'Line 2', line3: 'Line 3', line4: 'Line 4' }
+/* ------------------------------------------------------------------ */
+/*  Constants & Pure Functions                                          */
+/* ------------------------------------------------------------------ */
 
 function categoryColor(name) {
   const normalized = (name || '').trim().toLowerCase()
@@ -168,8 +169,10 @@ function ProgressCard({ line, isOwnLine, onClick, canNavigate }) {
         <p style={{ fontSize: '11px', fontWeight: 600, color: '#80868b', textTransform: 'uppercase', letterSpacing: '0.3px', margin: 0 }}>
           Lokasi
         </p>
-        {line.locations.map((loc) => (
-          <div key={loc.name} style={{
+        {line.locations.length === 0 ? (
+          <p style={{ fontSize: '12px', color: '#80868b', margin: 0 }}>Belum ada lokasi</p>
+        ) : line.locations.map((loc) => (
+          <div key={loc.id || loc.name} style={{
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
@@ -201,13 +204,13 @@ function ProgressCard({ line, isOwnLine, onClick, canNavigate }) {
   )
 }
 
-function CategoryBar({ categories }) {
+function CategoryBar({ categories, groupingColumnLabel }) {
   if (categories.length === 0) return null
 
   return (
     <div className="ds-card" style={{ gridColumn: '1 / -1' }}>
       <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: '#1f2328' }}>
-        Breakdown per Category
+        Breakdown per {groupingColumnLabel || 'Kategori'}
       </h3>
 
       <div style={{ width: '100%', height: Math.max(categories.length * 36, 180) }}>
@@ -235,12 +238,23 @@ export default function Dashboard() {
   const { currentUser, userRole, logout } = useAuth()
   const navigate = useNavigate()
 
-  const [components, setComponents] = useState([])
-  const [locations, setLocations] = useState({})
-  const [isLoading, setIsLoading] = useState(true)
-  const [requiredColumns, setRequiredColumns] = useState(
-    ['subMachine', 'category', 'part', 'spesification', 'status', 'qty', 'foto']
-  )
+  // ---- Live queries dari Dexie (pengganti mock data) ----
+  // useLiveQuery returns `undefined` while loading, then the actual value.
+  // We use default [] so components never receive undefined.
+  const linesRaw = useLiveQuery(() => db.lines_cache.toArray().then(r => r.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))), [])
+  const departments = useLiveQuery(() => db.departments_cache.toArray().then(r => r.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))), [], []) ?? []
+  const allLocations = useLiveQuery(() => db.locations_cache.toArray(), [], []) ?? []
+  const allRecords = useLiveQuery(
+    () => db.records.filter(rec => rec.isDeleted !== true).toArray(),
+    [],
+    []
+  ) ?? []
+  const allColumns = useLiveQuery(() => db.columns_config.toArray(), [], []) ?? []
+  const allExceptionRules = useLiveQuery(() => db.completion_exception_rules.toArray(), [], []) ?? []
+
+  const lines = linesRaw ?? []
+  // isLoading: true while the first query hasn't resolved yet
+  const isLoading = linesRaw === undefined
 
   // -- State untuk Speed Dial (FAB) --
   const [isFabVisible, setIsFabVisible] = useState(true)
@@ -251,17 +265,12 @@ export default function Dashboard() {
     let lastScrollY = window.scrollY
     const handleScroll = () => {
       const currentScrollY = window.scrollY
-
-      // UX Standar: Hilang saat scroll ke bawah, Muncul saat scroll ke atas.
-      // Jika ingin sebaliknya (Muncul hanya saat scroll ke bawah), 
-      // cukup ubah tanda `>` di bawah menjadi `<` (currentScrollY < lastScrollY)
       if (currentScrollY > lastScrollY) {
         setIsFabVisible(false)
-        setIsFabOpen(false) // Otomatis tutup menu jika sedang scroll
+        setIsFabOpen(false)
       } else {
         setIsFabVisible(true)
       }
-
       lastScrollY = currentScrollY
     }
 
@@ -269,58 +278,81 @@ export default function Dashboard() {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
-  function isRowComplete(row) {
-    const exemptWhenInactive = ['qty', 'foto', 'spesification']
-    return requiredColumns.every(col => {
-      if (exemptWhenInactive.includes(col) && row.status === 'Tidak Aktif') return true
-      const val = row[col]
-      return val !== null && val !== undefined && val !== ''
-    })
-  }
-
-  // --- Realtime listeners ---
-  useEffect(() => {
-    // Mocked for phase 1 - removed firebase dependencies
-    setComponents([])
-    setLocations({})
-    setIsLoading(false)
-  }, [])
-
-  // --- Derived data ---
+  // --- Derived data dari Dexie ---
   const stats = useMemo(() => {
-    const totalParts = components.length
-    const existing = components.filter(c => c.status === 'Existing').length
-    const inactive = components.filter(c => c.status === 'Tidak Aktif').length
-    const existingPct = totalParts > 0 ? Math.round((existing / totalParts) * 100) : 0
-    const inactivePct = totalParts > 0 ? Math.round((inactive / totalParts) * 100) : 0
+    if (!lines.length && !allRecords.length) {
+      return { totalParts: 0, totalRows: 0, totalCompleted: 0, overallPct: 0, lineData: [], categories: [] }
+    }
 
-    const lineData = LINE_IDS.map(lineId => {
-      const lineComps = components.filter(c => c.line === lineId)
-      const completed = lineComps.filter(isRowComplete).length
-      const locGroups = {}
-      lineComps.forEach(c => {
-        const lid = c.locationId || '__none__'
-        if (!locGroups[lid]) locGroups[lid] = []
-        locGroups[lid].push(c)
+    // Buat index kolom per department untuk evaluasi kelengkapan
+    const columnsByDept = {}
+    allColumns.forEach(col => {
+      if (!columnsByDept[col.department_id]) columnsByDept[col.department_id] = []
+      columnsByDept[col.department_id].push(col)
+    })
+
+    // Buat index exception rules per department
+    const rulesByDept = {}
+    allExceptionRules.forEach(rule => {
+      if (!rulesByDept[rule.department_id]) rulesByDept[rule.department_id] = []
+      rulesByDept[rule.department_id].push(rule)
+    })
+
+    // Buat index lokasi per line+dept
+    const locationsByLine = {}
+    allLocations.forEach(loc => {
+      if (!locationsByLine[loc.line_id]) locationsByLine[loc.line_id] = []
+      locationsByLine[loc.line_id].push(loc)
+    })
+
+    // Buat index record per lokasi
+    const recordsByLocation = {}
+    allRecords.forEach(rec => {
+      if (!recordsByLocation[rec.location_id]) recordsByLocation[rec.location_id] = []
+      recordsByLocation[rec.location_id].push(rec)
+    })
+
+    // Hitung per Line
+    const displayLines = lines.length > 0
+      ? lines
+      : [
+        { id: 'line1', name: 'Line 1' },
+        { id: 'line2', name: 'Line 2' },
+        { id: 'line3', name: 'Line 3' },
+        { id: 'line4', name: 'Line 4' },
+      ]
+
+    const lineData = displayLines.map(line => {
+      const lineLocations = locationsByLine[line.id] || []
+
+      const locationItems = lineLocations.map(loc => {
+        const locRecords = recordsByLocation[loc.id] || []
+        const deptCols = columnsByDept[loc.department_id] || []
+        const deptRules = rulesByDept[loc.department_id] || []
+        const allComplete = locRecords.length > 0 &&
+          locRecords.every(r => evaluateRowCompleteness(r.components, deptCols, deptRules))
+        return { id: loc.id, name: loc.name, complete: allComplete }
       })
 
-      const locChecklist = Object.entries(locGroups)
-        .sort(([aId], [bId]) => {
-          const aTime = locations[aId]?.createdAt?.toMillis?.() || 0
-          const bTime = locations[bId]?.createdAt?.toMillis?.() || 0
-          return aTime - bTime
-        })
-        .map(([locId, rows]) => ({
-          name: locations[locId]?.name || locId,
-          complete: rows.length > 0 && rows.every(isRowComplete),
-        }))
+      // Hitung total baris dan yang sudah lengkap untuk line ini
+      let lineTotalRows = 0
+      let lineCompletedRows = 0
+      lineLocations.forEach(loc => {
+        const locRecords = recordsByLocation[loc.id] || []
+        const deptCols = columnsByDept[loc.department_id] || []
+        const deptRules = rulesByDept[loc.department_id] || []
+        lineTotalRows += locRecords.length
+        lineCompletedRows += locRecords.filter(r =>
+          evaluateRowCompleteness(r.components, deptCols, deptRules)
+        ).length
+      })
 
       return {
-        id: lineId,
-        name: LINE_LABELS[lineId],
-        totalRows: lineComps.length,
-        completedRows: completed,
-        locations: locChecklist,
+        id: line.id,
+        name: line.name,
+        totalRows: lineTotalRows,
+        completedRows: lineCompletedRows,
+        locations: locationItems,
       }
     })
 
@@ -328,24 +360,50 @@ export default function Dashboard() {
     const totalCompleted = lineData.reduce((s, l) => s + l.completedRows, 0)
     const overallPct = totalRows > 0 ? Math.round((totalCompleted / totalRows) * 100) : 0
 
-    const catMap = {}
-    components.forEach(c => {
-      const raw = c.category?.trim()
-      if (!raw) return
-      const key = raw.toLowerCase()
-      if (!catMap[key]) catMap[key] = { count: 0, labelCounts: {} }
-      catMap[key].count += 1
-      catMap[key].labelCounts[raw] = (catMap[key].labelCounts[raw] || 0) + 1
-    })
-    const categories = Object.values(catMap)
-      .map(entry => {
-        const label = Object.entries(entry.labelCounts).sort((a, b) => b[1] - a[1])[0][0]
-        return { name: label, count: entry.count }
-      })
-      .sort((a, b) => b.count - a.count)
+    // --- Grafik Breakdown Dinamis ---
+    // Cari chart_grouping_column_key dari departments (ambil dari dept pertama)
+    let groupingKey = null
+    let groupingColumnLabel = 'Kategori'
+    if (departments.length > 0 && departments[0].chart_grouping_column_key) {
+      groupingKey = departments[0].chart_grouping_column_key
+      // Cari label kolom
+      const foundCol = allColumns.find(c => c.key === groupingKey)
+      if (foundCol) groupingColumnLabel = foundCol.label
+    } else if (allColumns.length > 0) {
+      // Fallback: kolom select atau text pertama yang visible
+      const fallbackCol = allColumns.find(c => c.is_visible !== false && (c.type === 'select' || c.type === 'text'))
+      if (fallbackCol) {
+        groupingKey = fallbackCol.key
+        groupingColumnLabel = fallbackCol.label
+      }
+    }
 
-    return { totalParts, existing, inactive, existingPct, inactivePct, lineData, totalRows, totalCompleted, overallPct, categories }
-  }, [components, locations, requiredColumns])
+    // Kelompokkan records berdasarkan groupingKey
+    const catMap = {}
+    if (groupingKey) {
+      allRecords.forEach(r => {
+        const raw = String((r.components || {})[groupingKey] || '').trim()
+        if (!raw) return
+        const keyLower = raw.toLowerCase()
+        if (!catMap[keyLower]) catMap[keyLower] = { count: 0, label: raw }
+        catMap[keyLower].count += 1
+      })
+    }
+    const categories = Object.values(catMap)
+      .map(entry => ({ name: entry.label, count: entry.count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 20)
+
+    return {
+      totalParts: allRecords.length,
+      totalRows,
+      totalCompleted,
+      overallPct,
+      lineData,
+      categories,
+      groupingColumnLabel,
+    }
+  }, [lines, allRecords, allLocations, allColumns, allExceptionRules, departments])
 
   async function handleLogout() {
     try {
@@ -563,7 +621,7 @@ export default function Dashboard() {
             </div>
 
             {/* ---- Row 3: Category breakdown ---- */}
-            <CategoryBar categories={stats.categories} />
+            <CategoryBar categories={stats.categories} groupingColumnLabel={stats.groupingColumnLabel} />
           </>
         )}
       </main>

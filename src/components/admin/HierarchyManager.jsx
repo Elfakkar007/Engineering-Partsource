@@ -1,7 +1,7 @@
-/**
+﻿/**
  * HierarchyManager.jsx
  *
- * Panel kelola hierarki Line → Department → Location — SRS v2.0 §4
+ * Panel kelola hierarki Line 鈫?Department 鈫?Location 鈥?SRS v2.0 搂4
  *
  * Semua perubahan langsung disimpan ke Dexie cache (lines_cache, departments_cache,
  * locations_cache) sehingga ThreeTierNav langsung mencerminkan struktur terbaru.
@@ -57,7 +57,7 @@ function InlineAddForm({ placeholder, onAdd, onCancel }) {
 /*  Lines Manager                                                        */
 /* ------------------------------------------------------------------ */
 function LinesManager({ userId }) {
-  const lines = useLiveQuery(() => db.lines_cache.orderBy('order').toArray(), [], [])
+  const lines = useLiveQuery(() => db.lines_cache.toArray().then(r => r.sort((a,b) => (a.order??0)-(b.order??0))), [], [])
   const [adding, setAdding] = useState(false)
   const [editId, setEditId] = useState(null)
   const [editName, setEditName] = useState('')
@@ -126,7 +126,7 @@ function LinesManager({ userId }) {
 /*  Departments Manager                                                  */
 /* ------------------------------------------------------------------ */
 function DepartmentsManager({ userId }) {
-  const depts = useLiveQuery(() => db.departments_cache.orderBy('order').toArray(), [], [])
+  const depts = useLiveQuery(() => db.departments_cache.toArray().then(r => r.sort((a,b) => (a.order??0)-(b.order??0))), [], [])
   const [adding, setAdding] = useState(false)
   const [editId, setEditId] = useState(null)
   const [editName, setEditName] = useState('')
@@ -195,8 +195,8 @@ function DepartmentsManager({ userId }) {
 /*  Locations Manager                                                    */
 /* ------------------------------------------------------------------ */
 function LocationsManager({ userId }) {
-  const lines = useLiveQuery(() => db.lines_cache.orderBy('order').toArray(), [], [])
-  const depts = useLiveQuery(() => db.departments_cache.orderBy('order').toArray(), [], [])
+  const lines = useLiveQuery(() => db.lines_cache.toArray().then(r => r.sort((a,b) => (a.order??0)-(b.order??0))), [], [])
+  const depts = useLiveQuery(() => db.departments_cache.toArray().then(r => r.sort((a,b) => (a.order??0)-(b.order??0))), [], [])
   const locations = useLiveQuery(() => db.locations_cache.toArray(), [], [])
   const [filterLine, setFilterLine] = useState('')
   const [filterDept, setFilterDept] = useState('')

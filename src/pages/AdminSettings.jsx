@@ -17,6 +17,7 @@ import SchemaBuilder from '../components/admin/SchemaBuilder'
 import HierarchyManager from '../components/admin/HierarchyManager'
 import ItemCodeRuleManager from '../components/admin/ItemCodeRuleManager'
 import SyncMonitor from '../components/admin/SyncMonitor'
+import CompletionRulesManager from '../components/admin/CompletionRulesManager'
 
 /* ------------------------------------------------------------------ */
 /*  Tab config                                                           */
@@ -62,6 +63,18 @@ const TABS = [
       </svg>
     ),
     desc: 'Monitor dan trigger sinkronisasi data ke PocketBase.',
+  },
+  {
+    id: 'exception_rules',
+    label: 'Exception Rules',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2L2 7l10 5 10-5-10-5z" />
+        <path d="M2 17l10 5 10-5" />
+        <path d="M2 12l10 5 10-5" />
+      </svg>
+    ),
+    desc: 'Atur kondisi di mana kolom wajib boleh dikosongkan.',
   },
 ]
 
@@ -142,10 +155,11 @@ export default function AdminSettings() {
 
           {/* Tab panels */}
           <div style={{ background: '#fff', borderRadius: '12px', padding: '24px', border: '1px solid #dadce0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-            {activeTab === 'schema'    && <SchemaBuilder userId={userId} />}
-            {activeTab === 'hierarchy' && <HierarchyManager userId={userId} />}
-            {activeTab === 'itemcode'  && <ItemCodeRuleManager />}
-            {activeTab === 'sync'      && <SyncMonitor />}
+            {activeTab === 'schema'           && <SchemaBuilder userId={userId} />}
+            {activeTab === 'hierarchy'         && <HierarchyManager userId={userId} />}
+            {activeTab === 'itemcode'          && <ItemCodeRuleManager />}
+            {activeTab === 'sync'              && <SyncMonitor />}
+            {activeTab === 'exception_rules'   && <CompletionRulesManager />}
           </div>
         </main>
       </div>

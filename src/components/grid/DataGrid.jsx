@@ -25,6 +25,7 @@ import { useGridData } from '../../hooks/useGridData'
 import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
 import { logActivity } from '../../lib/activityLog'
+import { evaluateRowCompleteness, useLiveExceptionRules } from '../../hooks/useRowCompleteness'
 import EditableCell from './EditableCell'
 import ConfirmDeleteModal from '../ConfirmDeleteModal'
 import ExportModal from './ExportModal'
@@ -40,31 +41,8 @@ const ACTION_COL_W = 72
 const DEFAULT_COL_W = 140
 const UNDO_LIMIT = 20
 
-/* ------------------------------------------------------------------ */
-/*  Business rule: baris "Tidak Aktif" — kolom number tidak wajib diisi */
-/* ------------------------------------------------------------------ */
-/**
- * @param {Object}   row      - baris (row.components = { col_1: ... })
- * @param {Object[]} columns  - definisi kolom dari useDynamicSchema
- * @returns {boolean}
- */
-function isRowComplete(row, columns) {
-  const comps = row.components || {}
-  const hasInactiveStatus = columns.some(col => {
-    if (col.type !== 'select') return false
-    const val = String(comps[col.key] || '').toLowerCase()
-    return val.includes('tidak aktif') || val.includes('inactive')
-  })
-
-  return columns
-    .filter(col => col.is_required)
-    .every(col => {
-      // Exempt number columns from required check when row is "Tidak Aktif"
-      if (hasInactiveStatus && col.type === 'number') return true
-      const val = comps[col.key]
-      return val !== null && val !== undefined && val !== ''
-    })
-}
+// isRowComplete telah dihapus — gunakan evaluateRowCompleteness() dari useRowCompleteness.js
+// yang bersumber dari columns_config + completion_exception_rules (SRS v2.0 §6 & §8.2)
 
 /* ------------------------------------------------------------------ */
 /*  ColumnFilterPopover                                                  */
@@ -377,6 +355,8 @@ export default function DataGrid({ locationName, canEdit }) {
   // Dynamic schema and data hooks
   const { columns } = useDynamicSchema(activeDepartmentId)
   const { rows, isLoading, addRow, bulkAddRows, updateCell, updateFlag, deleteRow, bulkDeleteRows, bulkFillColumn } = useGridData(activeLocationId, activeDepartmentId)
+  // Aturan pengecualian kelengkapan — diambil live dari Dexie, reaktif saat Admin mengubah rules
+  const exceptionRules = useLiveExceptionRules(activeDepartmentId)
 
   const userId = currentUser?.uid || currentUser?.email || ''
 
@@ -802,7 +782,7 @@ export default function DataGrid({ locationName, canEdit }) {
             <tbody>
               {filteredRows.map((row, idx) => {
                 const isSelected = selectedRows.has(row.id)
-                const complete = isRowComplete(row, columns)
+                const complete = evaluateRowCompleteness(row.components, columns, exceptionRules)
                 const rowFlag = row.flag
 
                 let trClass = ''

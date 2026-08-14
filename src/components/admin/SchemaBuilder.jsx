@@ -418,8 +418,67 @@ export default function SchemaBuilder({ userId = '' }) {
               </table>
             </div>
           )}
+
+          {/* ---- Pengaturan Dashboard ---- */}
+          <DashboardSettings deptId={effectiveDeptId} columns={allColumns} addToast={addToast} />
         </>
       )}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  DashboardSettings — Pilih kolom pengelompokan chart                  */
+/* ------------------------------------------------------------------ */
+function DashboardSettings({ deptId, columns, addToast }) {
+  const dept = useLiveQuery(
+    () => deptId ? db.departments_cache.get(deptId) : undefined,
+    [deptId]
+  )
+  const [saving, setSaving] = useState(false)
+
+  const visibleCols = (columns || []).filter(c => c.is_visible !== false)
+
+  async function handleChange(e) {
+    const newKey = e.target.value
+    setSaving(true)
+    try {
+      await db.departments_cache.update(deptId, { chart_grouping_column_key: newKey || null })
+      addToast('Pengaturan Dashboard disimpan.', 'success')
+    } catch (err) {
+      addToast('Gagal menyimpan: ' + err.message, 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!dept) return null
+
+  return (
+    <div style={{ marginTop: '24px', padding: '16px 20px', border: '1px solid #d0d7de', borderRadius: '8px', background: '#f6f8fa' }}>
+      <h4 style={{ margin: '0 0 8px', fontSize: '13px', fontWeight: 600, color: '#1f2328' }}>
+        📊 Pengaturan Dashboard
+      </h4>
+      <p style={{ margin: '0 0 12px', fontSize: '12px', color: '#5f6368' }}>
+        Pilih kolom yang digunakan sebagai sumbu pengelompokan pada grafik Breakdown di Dashboard.
+      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+        <label style={{ fontSize: '13px', fontWeight: 500, color: '#1f2328', whiteSpace: 'nowrap' }}>
+          Kolom Pengelompokan Grafik:
+        </label>
+        <select
+          value={dept.chart_grouping_column_key || ''}
+          onChange={handleChange}
+          disabled={saving}
+          style={{ padding: '6px 10px', border: '1px solid #d0d7de', borderRadius: '6px', fontSize: '13px', minWidth: '200px' }}
+        >
+          <option value="">-- Otomatis (kolom pertama) --</option>
+          {visibleCols.map(c => (
+            <option key={c.key} value={c.key}>{c.label} ({c.type})</option>
+          ))}
+        </select>
+        {saving && <span style={{ fontSize: '12px', color: '#5f6368' }}>Menyimpan...</span>}
+      </div>
     </div>
   )
 }

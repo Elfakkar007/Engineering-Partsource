@@ -1,18 +1,18 @@
-/**
+﻿/**
  * itemCodeEngine.js
  *
- * Dynamic Item Code Engine — SRS v2.0 §7
+ * Dynamic Item Code Engine 鈥?SRS v2.0 搂7
  *
  * Dua fungsi utama:
  *   1. matchReferenceCode(colKey, value, departmentId)
- *      — Cari di `reference_catalog` saat kolom is_ref_trigger=true berubah.
- *        Jika ada match → kembalikan { matched: true, item_code, ... }
+ *      鈥?Cari di `reference_catalog` saat kolom is_ref_trigger=true berubah.
+ *        Jika ada match 鈫?kembalikan { matched: true, item_code, ... }
  *
  *   2. generateItemCode(row, columns, departmentId)
- *      — Parse template dari `item_code_rules` dan generate kode baru
+ *      鈥?Parse template dari `item_code_rules` dan generate kode baru
  *        untuk baris yang belum punya kode dan tidak ada catalog match.
  *
- * Catatan arsitektur (SRS §7):
+ * Catatan arsitektur (SRS 搂7):
  *   Increment `next_seq` yang atomic HARUS di server (PocketBase hook) untuk
  *   menghindari duplikasi saat dua device sync bersamaan. Client-side engine ini
  *   hanya men-generate kode berbasis data lokal untuk preview/offline; saat sync
@@ -42,7 +42,7 @@ function normalize(val) {
 /**
  * Cari match di reference_catalog berdasarkan nilai kolom trigger.
  *
- * Algoritma (SRS §5.2 Dual-Matching):
+ * Algoritma (SRS 搂5.2 Dual-Matching):
  *   - Bangun match_signature dari colKey + value (normalized)
  *   - Query semua catalog entries untuk department ini
  *   - Bandingkan normalized value
@@ -114,10 +114,10 @@ function sanitizeCodePart(val) {
 /**
  * Parse template string dan generate kode berdasarkan nilai baris + counter lokal.
  *
- * Template format (SRS §5.2):
- *   {col_KEY}   → nilai row.components[col_KEY] (sanitized)
- *   {seq:N}     → nomor urut, zero-padded N digit (dari item_code_rules.next_seq)
- *   karakter lain → disalin apa adanya
+ * Template format (SRS 搂5.2):
+ *   {col_KEY}   鈫?nilai row.components[col_KEY] (sanitized)
+ *   {seq:N}     鈫?nomor urut, zero-padded N digit (dari item_code_rules.next_seq)
+ *   karakter lain 鈫?disalin apa adanya
  *
  * @param {string}   template    - mis. "{col_1}{col_3}{seq:3}"
  * @param {Object}   components  - row.components (key-value)
@@ -128,14 +128,14 @@ export function parseItemCodeTemplate(template, components, seqNum = 1) {
   if (!template) return ''
 
   return template.replace(/\{([^}]+)\}/g, (_, token) => {
-    // {seq:N} → zero-padded sequence
+    // {seq:N} 鈫?zero-padded sequence
     const seqMatch = token.match(/^seq:(\d+)$/)
     if (seqMatch) {
       const digits = parseInt(seqMatch[1], 10) || 3
       return String(seqNum).padStart(digits, '0')
     }
 
-    // {col_KEY} → sanitized component value
+    // {col_KEY} 鈫?sanitized component value
     const val = (components || {})[token]
     return sanitizeCodePart(val)
   })
@@ -146,8 +146,8 @@ export function parseItemCodeTemplate(template, components, seqNum = 1) {
  *
  * Urutan:
  *   1. Ambil item_code_rules untuk department ini
- *   2. Hitung local seq (jumlah components dengan dept ini + 1) — approx untuk offline
- *   3. Parse template → return generated code (sebagai preview; server akan re-generate resmi)
+ *   2. Hitung local seq (jumlah components dengan dept ini + 1) 鈥?approx untuk offline
+ *   3. Parse template 鈫?return generated code (sebagai preview; server akan re-generate resmi)
  *
  * @param {Object}   row           - baris component (row.components = {...})
  * @param {string}   departmentId
@@ -166,7 +166,7 @@ export async function generateItemCode(row, departmentId) {
     if (!rule || !rule.template) return null
 
     // Approx local seq: jumlah records existing + 1 (offline estimate)
-    const existingCount = await db.components
+    const existingCount = await db.records
       .where('department_id')
       .equals(departmentId)
       .count()

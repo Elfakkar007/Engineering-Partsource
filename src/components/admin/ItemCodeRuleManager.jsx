@@ -2,7 +2,7 @@
  * ItemCodeRuleManager.jsx
  *
  * Panel kelola aturan kode barang (item_code_rules) & Reference Catalog
- * SRS v2.0 §7 & DESIGN_v2.md §5 (ItemCodeRuleBuilder)
+ * SRS v2.0 搂7 & DESIGN_v2.md 搂5 (ItemCodeRuleBuilder)
  *
  * Bagian 1: Template Builder per Department
  *   - Input template dengan chip insert kolom & {seq:N}
@@ -10,7 +10,7 @@
  *   - Simpan ke Dexie item_code_rules
  *
  * Bagian 2: Reference Catalog Viewer/Manager
- *   - Tabel match_signature → item_code
+ *   - Tabel match_signature 鈫?item_code
  *   - Tambah entry baru
  *   - Hapus entry yang salah
  */
@@ -131,7 +131,7 @@ function TemplateBuilder({ deptId, columns }) {
           <label style={{ fontSize: '12px', fontWeight: 500, color: '#5f6368', display: 'block', marginBottom: '4px' }}>Kolom Target (auto-fill kode):</label>
           <select value={targetKey} onChange={e => setTargetKey(e.target.value)}
             style={{ width: '100%', padding: '6px 8px', fontSize: '12px', border: '1px solid #dadce0', borderRadius: '5px' }}>
-            <option value="">— Pilih kolom —</option>
+            <option value="">-- Pilih kolom --</option>
             {(columns || []).filter(c => c.is_auto || c.key.includes('code') || c.key.includes('kode')).map(col => (
               <option key={col.key} value={col.key}>{col.label}</option>
             ))}
@@ -225,7 +225,7 @@ function ReferenceCatalog({ deptId, columns }) {
               <label style={{ fontSize: '11px', color: '#5f6368', display: 'block', marginBottom: '3px' }}>Kolom Trigger:</label>
               <select value={newTriggerKey} onChange={e => setNewTriggerKey(e.target.value)}
                 style={{ width: '100%', padding: '5px 6px', fontSize: '12px', border: '1px solid #dadce0', borderRadius: '4px' }}>
-                <option value="">— Pilih —</option>
+                <option value="">-- Pilih --</option>
                 {triggerCols.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
                 {triggerCols.length === 0 && (columns || []).map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
               </select>
@@ -283,7 +283,7 @@ function ReferenceCatalog({ deptId, columns }) {
                   </td>
                   <td style={{ padding: '7px 10px', textAlign: 'center' }}>
                     <button onClick={() => handleDelete(entry)}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d93025', fontSize: '14px' }}>✕</button>
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d93025', fontSize: '14px' }}>X</button>
                   </td>
                 </tr>
               ))}
@@ -299,7 +299,7 @@ function ReferenceCatalog({ deptId, columns }) {
 /*  Main Component                                                       */
 /* ------------------------------------------------------------------ */
 export default function ItemCodeRuleManager() {
-  const departments = useLiveQuery(() => db.departments_cache.orderBy('order').toArray(), [], [])
+  const departments = useLiveQuery(() => db.departments_cache.toArray().then(r => r.sort((a,b) => (a.order??0)-(b.order??0))), [], [])
   const [activeDeptId, setActiveDeptId] = useState(null)
 
   const effectiveDeptId = activeDeptId || departments?.[0]?.id || null

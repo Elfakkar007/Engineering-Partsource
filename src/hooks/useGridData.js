@@ -6,7 +6,7 @@
  * Prinsip kerja:
  *  1. Setiap operasi CRUD ditulis ke Dexie.js DAHULU (offline-first)
  *  2. Setiap operasi CRUD secara ATOMIK juga mendaftarkan entry ke `sync_queue`
- *     menggunakan db.transaction('rw', [db.components, db.sync_queue], ...)
+ *     menggunakan db.transaction('rw', [db.records, db.sync_queue], ...)
  *  3. Background sync worker (syncWorker.js) yang kemudian push antrian ke PocketBase
  *
  * Setiap item sync_queue menyimpan:
@@ -67,25 +67,20 @@ function makeSyncEntry(operation, entityId, payload, pbId = null) {
  * @param {string} departmentId  - ID department aktif
  */
 export function useGridData(locationId, departmentId) {
-  // Reactive query — hanya baris aktif (isDeleted=false) untuk lokasi ini
+  // Reactive query 鈥?hanya baris aktif (isDeleted=false) untuk lokasi ini
   const rows = useLiveQuery(
     () => {
       if (!locationId || !departmentId) return []
-      return db.components
-        .where('[location_id+isDeleted]')
-        // Compound index belum tersedia di schema v1 — gunakan filter manual
+      return db.records
+        .where('location_id')
+        .equals(locationId)
         .filter(row =>
-          row.location_id === locationId &&
           row.department_id === departmentId &&
           row.isDeleted !== true
         )
-        // Workaround: query semua dari location_id lalu filter
-        // (compound index dapat ditambahkan di db versi berikutnya)
         .toArray()
         .then(all =>
-          all
-            .filter(r => r.department_id === departmentId && !r.isDeleted)
-            .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+          all.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
         )
     },
     [locationId, departmentId],
@@ -93,7 +88,7 @@ export function useGridData(locationId, departmentId) {
   )
 
   /* ------------------------------------------------------------------ */
-  /*  CREATE — tambah satu baris kosong                                  */
+  /*  CREATE 鈥?tambah satu baris kosong                                  */
   /* ------------------------------------------------------------------ */
 
   /**
@@ -125,8 +120,8 @@ export function useGridData(locationId, departmentId) {
     }
 
     let newId
-    await db.transaction('rw', [db.components, db.sync_queue], async () => {
-      newId = await db.components.add(newRow)
+    await db.transaction('rw', [db.records, db.sync_queue], async () => {
+      newId = await db.records.add(newRow)
       await db.sync_queue.add(makeSyncEntry('create', newId, { ...newRow, id: newId }))
     })
 
@@ -137,7 +132,7 @@ export function useGridData(locationId, departmentId) {
   }
 
   /* ------------------------------------------------------------------ */
-  /*  BULK CREATE — tambah N baris kosong sekaligus                      */
+  /*  BULK CREATE 鈥?tambah N baris kosong sekaligus                      */
   /* ------------------------------------------------------------------ */
 
   /**
@@ -152,7 +147,7 @@ export function useGridData(locationId, departmentId) {
     const now = nowISO()
     const newIds = []
 
-    await db.transaction('rw', [db.components, db.sync_queue], async () => {
+    await db.transaction('rw', [db.records, db.sync_queue], async () => {
       for (let i = 0; i < safeCount; i++) {
         const row = {
           location_id: locationId,
@@ -170,7 +165,7 @@ export function useGridData(locationId, departmentId) {
           lastUpdated: now,
           sync_status: 'pending',
         }
-        const id = await db.components.add(row)
+        const id = await db.records.add(row)
         newIds.push(id)
         await db.sync_queue.add(makeSyncEntry('create', id, { ...row, id }))
       }
@@ -181,7 +176,7 @@ export function useGridData(locationId, departmentId) {
   }
 
   /* ------------------------------------------------------------------ */
-  /*  UPDATE — simpan perubahan satu sel                                 */
+  /*  UPDATE 鈥?simpan perubahan satu sel                                 */
   /* ------------------------------------------------------------------ */
 
   /**
@@ -199,9 +194,9 @@ export function useGridData(locationId, departmentId) {
   async function updateCell(rowId, colKey, value, editedBy = '', colMeta = null) {
     const now = nowISO()
 
-    await db.transaction('rw', [db.components, db.sync_queue], async () => {
+    await db.transaction('rw', [db.records, db.sync_queue], async () => {
       // Ambil baris saat ini untuk dapat snapshot payload lengkap
-      const row = await db.components.get(rowId)
+      const row = await db.records.get(rowId)
       if (!row) throw new Error(`Baris dengan ID ${rowId} tidak ditemukan`)
 
       let updatedComponents = { ...row.components, [colKey]: value }
@@ -222,7 +217,7 @@ export function useGridData(locationId, departmentId) {
               updatedComponents = { ...updatedComponents, [targetKey]: matchResult.item_code }
             }
           } else if (!matchResult.matched) {
-            // Tidak ada match di catalog → generate kode baru dari template
+            // Tidak ada match di catalog 鈫?generate kode baru dari template
             const generatedCode = await generateItemCode(
               { ...row, components: updatedComponents },
               row.department_id
@@ -243,7 +238,7 @@ export function useGridData(locationId, departmentId) {
       }
 
       // Update Dexie
-      await db.components.update(rowId, {
+      await db.records.update(rowId, {
         components: updatedComponents,
         last_edited_by: editedBy,
         lastUpdated: now,
@@ -275,7 +270,7 @@ export function useGridData(locationId, departmentId) {
   }
 
   /* ------------------------------------------------------------------ */
-  /*  UPDATE FLAG — set flag & flag_note pada satu baris                 */
+  /*  UPDATE FLAG 鈥?set flag & flag_note pada satu baris                 */
   /* ------------------------------------------------------------------ */
 
   /**
@@ -287,11 +282,11 @@ export function useGridData(locationId, departmentId) {
   async function updateFlag(rowId, flag, flagNote = null, editedBy = '') {
     const now = nowISO()
 
-    await db.transaction('rw', [db.components, db.sync_queue], async () => {
-      const row = await db.components.get(rowId)
+    await db.transaction('rw', [db.records, db.sync_queue], async () => {
+      const row = await db.records.get(rowId)
       if (!row) throw new Error(`Baris dengan ID ${rowId} tidak ditemukan`)
 
-      await db.components.update(rowId, {
+      await db.records.update(rowId, {
         flag,
         flag_note: flagNote,
         last_edited_by: editedBy,
@@ -313,7 +308,7 @@ export function useGridData(locationId, departmentId) {
   }
 
   /* ------------------------------------------------------------------ */
-  /*  DELETE (soft) — set isDeleted=true                                 */
+  /*  DELETE (soft) 鈥?set isDeleted=true                                 */
   /* ------------------------------------------------------------------ */
 
   /**
@@ -325,11 +320,11 @@ export function useGridData(locationId, departmentId) {
   async function deleteRow(rowId, deletedBy = '') {
     const now = nowISO()
 
-    await db.transaction('rw', [db.components, db.sync_queue], async () => {
-      const row = await db.components.get(rowId)
+    await db.transaction('rw', [db.records, db.sync_queue], async () => {
+      const row = await db.records.get(rowId)
       if (!row) throw new Error(`Baris dengan ID ${rowId} tidak ditemukan`)
 
-      await db.components.update(rowId, {
+      await db.records.update(rowId, {
         isDeleted: true,
         deletedAt: now,
         last_edited_by: deletedBy,
@@ -361,12 +356,12 @@ export function useGridData(locationId, departmentId) {
     if (!rowIds?.length) return
     const now = nowISO()
 
-    await db.transaction('rw', [db.components, db.sync_queue], async () => {
+    await db.transaction('rw', [db.records, db.sync_queue], async () => {
       for (const rowId of rowIds) {
-        const row = await db.components.get(rowId)
+        const row = await db.records.get(rowId)
         if (!row) continue
 
-        await db.components.update(rowId, {
+        await db.records.update(rowId, {
           isDeleted: true,
           deletedAt: now,
           last_edited_by: deletedBy,
@@ -384,7 +379,7 @@ export function useGridData(locationId, departmentId) {
   }
 
   /* ------------------------------------------------------------------ */
-  /*  BULK FILL — isi satu kolom ke banyak baris sekaligus               */
+  /*  BULK FILL 鈥?isi satu kolom ke banyak baris sekaligus               */
   /* ------------------------------------------------------------------ */
 
   /**
@@ -397,13 +392,13 @@ export function useGridData(locationId, departmentId) {
     if (!rowIds?.length) return
     const now = nowISO()
 
-    await db.transaction('rw', [db.components, db.sync_queue], async () => {
+    await db.transaction('rw', [db.records, db.sync_queue], async () => {
       for (const rowId of rowIds) {
-        const row = await db.components.get(rowId)
+        const row = await db.records.get(rowId)
         if (!row) continue
 
         const updatedComponents = { ...row.components, [colKey]: value }
-        await db.components.update(rowId, {
+        await db.records.update(rowId, {
           components: updatedComponents,
           last_edited_by: editedBy,
           lastUpdated: now,
@@ -424,7 +419,7 @@ export function useGridData(locationId, departmentId) {
   }
 
   /* ------------------------------------------------------------------ */
-  /*  BULK INSERT — import dari Excel (dengan batch tracking)             */
+  /*  BULK INSERT 鈥?import dari Excel (dengan batch tracking)             */
   /* ------------------------------------------------------------------ */
 
   /**
@@ -443,7 +438,7 @@ export function useGridData(locationId, departmentId) {
     const now = nowISO()
     const newIds = []
 
-    await db.transaction('rw', [db.components, db.sync_queue], async () => {
+    await db.transaction('rw', [db.records, db.sync_queue], async () => {
       for (const comps of componentsList) {
         const row = {
           location_id: locationId,
@@ -462,7 +457,7 @@ export function useGridData(locationId, departmentId) {
           lastUpdated: now,
           sync_status: 'pending',
         }
-        const id = await db.components.add(row)
+        const id = await db.records.add(row)
         newIds.push(id)
         await db.sync_queue.add(makeSyncEntry('create', id, { ...row, id }))
       }

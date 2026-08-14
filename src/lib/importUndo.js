@@ -1,7 +1,7 @@
-/**
+﻿/**
  * importUndo.js
  *
- * Implementasi Undo Import berbasis Dexie.js — SRS v2.0 §9.6
+ * Implementasi Undo Import berbasis Dexie.js 鈥?SRS v2.0 搂9.6
  *
  * Prinsip:
  *  - Setiap import mencatat import_batch_id di setiap baris yang diimpor
@@ -15,7 +15,7 @@
 import { db } from './db'
 
 /* ------------------------------------------------------------------ */
-/*  Module state — batch terakhir yang bisa di-undo                     */
+/*  Module state 鈥?batch terakhir yang bisa di-undo                     */
 /* ------------------------------------------------------------------ */
 
 let _lastUndoableBatch = null  // { batchId, rowCount, location, importedAt }
@@ -97,7 +97,7 @@ export async function undoImportBatch(batchId, onProgress) {
   if (typeof onProgress === 'function') onProgress('Memuat daftar baris yang diimpor...')
 
   // Ambil semua baris dengan import_batch_id ini
-  const rows = await db.components
+  const rows = await db.records
     .where('import_batch_id')
     .equals(batchId)
     .toArray()
@@ -108,9 +108,9 @@ export async function undoImportBatch(batchId, onProgress) {
   let deleted = 0
 
   // Soft-delete secara atomik dalam satu transaction
-  await db.transaction('rw', [db.components, db.import_batches], async () => {
+  await db.transaction('rw', [db.records, db.import_batches], async () => {
     for (const row of rows) {
-      await db.components.update(row.id, {
+      await db.records.update(row.id, {
         isDeleted: true,
         deletedAt: now,
         lastUpdated: now,

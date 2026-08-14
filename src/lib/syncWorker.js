@@ -1,10 +1,10 @@
 /**
  * syncWorker.js
  *
- * Background Sync Worker — memproses `sync_queue` di Dexie dan mendorong
+ * Background Sync Worker 鈥?memproses `sync_queue` di Dexie dan mendorong
  * perubahan ke PocketBase REST API ketika browser online.
  *
- * Algoritma per item (FIFO per entity_id, SRS §12.2):
+ * Algoritma per item (FIFO per entity_id, SRS 搂12.2):
  *  1. Ambil item status='pending' tertua per entity_id
  *  2. Tandai status='syncing'
  *  3. Kirim ke PocketBase (POST/PATCH untuk update, PATCH isDeleted untuk soft-delete)
@@ -25,9 +25,9 @@ import { pb } from './pocketbase'
 /*  Konfigurasi                                                         */
 /* ------------------------------------------------------------------ */
 
-const COLLECTION = 'components'   // nama collection di PocketBase
+const COLLECTION = 'records'   // nama collection di PocketBase
 const SYNC_INTERVAL_MS = 15_000   // coba sync tiap 15 detik saat online
-const MAX_RETRY_COUNT = 5         // setelah N kali gagal → tandai 'failed'
+const MAX_RETRY_COUNT = 5         // setelah N kali gagal 鈫?tandai 'failed'
 const MAX_BACKOFF_MS = 5 * 60 * 1000 // backoff maksimum 5 menit
 
 /* ------------------------------------------------------------------ */
@@ -95,7 +95,7 @@ async function processQueueItem(item) {
       response = await pb.collection(COLLECTION).create(serverPayload)
 
       // Simpan PocketBase ID ke Dexie
-      await db.components.update(entity_id, {
+      await db.records.update(entity_id, {
         pb_id: response.id,
         sync_status: 'synced',
         lastUpdated: response.updated || new Date().toISOString(),
@@ -110,7 +110,7 @@ async function processQueueItem(item) {
 
     } else if (operation === 'update') {
       if (!pb_id) {
-        // Belum ada PocketBase ID — baris ini belum pernah ter-sync
+        // Belum ada PocketBase ID 鈥?baris ini belum pernah ter-sync
         // Skip untuk sekarang (akan dicoba lagi setelah 'create' berhasil)
         return false
       }
@@ -122,14 +122,14 @@ async function processQueueItem(item) {
 
       response = await pb.collection(COLLECTION).update(pb_id, serverPayload)
 
-      await db.components.update(entity_id, {
+      await db.records.update(entity_id, {
         sync_status: 'synced',
         lastUpdated: response.updated || new Date().toISOString(),
       })
 
     } else if (operation === 'delete') {
       if (!pb_id) {
-        // Belum punya PocketBase ID — tidak perlu delete di server
+        // Belum punya PocketBase ID 鈥?tidak perlu delete di server
         // Langsung hapus dari queue
         await db.sync_queue.delete(queueId)
         return true
@@ -229,7 +229,7 @@ async function runSyncCycle() {
  * Dipanggil oleh useGridData setiap kali ada operasi tulis.
  */
 export function triggerSync() {
-  // Jalankan async tanpa await — tidak memblokir UI
+  // Jalankan async tanpa await 鈥?tidak memblokir UI
   runSyncCycle().catch(err => console.error('[syncWorker] triggerSync error:', err))
 }
 
@@ -244,7 +244,7 @@ export function triggerSync() {
 export function initSyncWorker() {
   // Listener saat browser online kembali
   const handleOnline = () => {
-    console.log('[syncWorker] Browser kembali online — mulai sync...')
+    console.log('[syncWorker] Browser kembali online 鈥?mulai sync...')
     triggerSync()
   }
   window.addEventListener('online', handleOnline)

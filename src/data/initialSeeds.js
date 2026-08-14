@@ -363,23 +363,38 @@ async function seedDepartment(departmentId, columnDefs) {
   const existing = await db.columns_config
     .where('department_id')
     .equals(departmentId)
-    .count()
+    .toArray()
 
-  if (existing > 0) {
-    console.log(`[seed] columns_config untuk department "${departmentId}" sudah ada (${existing} kolom) — seed dilewati.`)
+  if (existing.length > 0) {
+    // Clean up any duplicates caused by previous race conditions
+    const seenKeys = new Set()
+    const duplicateIds = []
+    for (const col of existing) {
+      if (seenKeys.has(col.key)) {
+        duplicateIds.push(col.id)
+      } else {
+        seenKeys.add(col.key)
+      }
+    }
+    if (duplicateIds.length > 0) {
+      await db.columns_config.bulkDelete(duplicateIds)
+      console.log(`[seed] Menghapus ${duplicateIds.length} kolom duplikat di ${departmentId}.`)
+    }
+
+    console.log(`[seed] columns_config untuk department "${departmentId}" sudah ada (${existing.length - duplicateIds.length} kolom) — seed dilewati.`)
     return
   }
 
   const now = new Date().toISOString()
-  const records = columnDefs.map(col => ({
+  const rows = columnDefs.map(col => ({
     ...col,
     department_id: departmentId,
     created_at: now,
     updated_at: now,
   }))
 
-  await db.columns_config.bulkAdd(records)
-  console.log(`[seed] Berhasil seed ${records.length} kolom untuk department "${departmentId}".`)
+  await db.columns_config.bulkAdd(rows)
+  console.log(`[seed] Berhasil seed ${rows.length} kolom untuk department "${departmentId}".`)
 }
 
 /**
@@ -398,15 +413,113 @@ export async function seedDepartmentElektrik(departmentId) {
   return seedDepartment(departmentId, ELEKTRIK_COLUMNS)
 }
 
+/* ------------------------------------------------------------------ */
+/*  Seed Hierarki (Line / Department / Location)                        */
+/* ------------------------------------------------------------------ */
+
 /**
- * Seed semua department sekaligus dari sebuah mapping { departmentId: columnDefs }.
- * Berguna saat inisialisasi pertama kali setelah login.
+ * Seed hierarki dasar (lines, departments, locations) ke Dexie.
+ * Idempotent: lewati jika sudah ada data.
+ */
+export async function seedHierarchy() {
+  const now = new Date().toISOString()
+
+  // --- Lines (bulkPut = upsert, tidak error jika sudah ada) ---
+  await db.lines_cache.bulkPut([
+    { id: 'line1', name: 'Line 1', order: 1, created_at: now },
+    { id: 'line2', name: 'Line 2', order: 2, created_at: now },
+    { id: 'line3', name: 'Line 3', order: 3, created_at: now },
+    { id: 'line4', name: 'Line 4', order: 4, created_at: now },
+  ]).catch(() => {}) // Abaikan jika gagal (data dari PocketBase lebih up-to-date)
+
+  // --- Departments (pastikan chart_grouping_column_key ada) ---
+  for (const deptData of [
+    { id: 'dept_elektrik', name: 'Elektrik', order: 1, chart_grouping_column_key: 'col_e5', created_at: now },
+    { id: 'dept_mekanik', name: 'Mekanik', order: 2, chart_grouping_column_key: 'col_6', created_at: now },
+  ]) {
+    // Hanya update jika belum ada atau belum punya chart_grouping_column_key
+    const existing = await db.departments_cache.get(deptData.id)
+    if (!existing) {
+      await db.departments_cache.put(deptData).catch(() => {})
+    } else if (!existing.chart_grouping_column_key) {
+      await db.departments_cache.update(deptData.id, { chart_grouping_column_key: deptData.chart_grouping_column_key }).catch(() => {})
+    }
+  }
+
+  // --- Locations (hanya tambah jika belum ada sama sekali) ---
+  const existingLocs = await db.locations_cache.count()
+  if (existingLocs === 0) {
+    const locations = []
+    const lineIds = ['line1', 'line2', 'line3', 'line4']
+    const depts = [
+      { id: 'dept_elektrik', suffix: 'EL' },
+      { id: 'dept_mekanik', suffix: 'MK' },
+    ]
+    let locOrder = 1
+    for (const lineId of lineIds) {
+      for (const dept of depts) {
+        locations.push({
+          id: `loc_${lineId}_${dept.suffix}_A`,
+          line_id: lineId,
+          department_id: dept.id,
+          name: 'Lokasi A',
+          order: locOrder++,
+          created_at: now,
+        })
+      }
+    }
+    await db.locations_cache.bulkPut(locations).catch(() => {})
+    console.log(`[seed] Berhasil seed ${locations.length} lokasi.`)
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Seed Completion Exception Rules                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Seed aturan pengecualian kelengkapan baris default.
+ * Idempotent: lewati jika sudah ada data.
+ *
+ * Rule Elektrik: jika Status (col_e10) = "Tidak Aktif" → Qty (col_e11) tidak wajib.
+ */
+export async function seedCompletionRules() {
+  const now = new Date().toISOString()
+
+  const existingCount = await db.completion_exception_rules.count()
+  if (existingCount > 0) {
+    console.log('[seed] completion_exception_rules sudah ada — seed dilewati.')
+    return
+  }
+
+  await db.completion_exception_rules.bulkAdd([
+    {
+      department_id: 'dept_elektrik',
+      condition_column_key: 'col_e10',
+      condition_value: 'Tidak Aktif',
+      exempt_column_keys: ['col_e11'],
+      created_at: now,
+    },
+  ])
+  console.log('[seed] Berhasil seed completion exception rules.')
+}
+
+/**
+ * Seed semua kebutuhan awal aplikasi.
+ * Dipanggil dari App.jsx setelah login berhasil.
  *
  * @param {{ mekanik: string, elektrik: string }} departmentIds
  */
 export async function seedAllDepartments({ mekanik, elektrik } = {}) {
+  // 1. Seed hierarki Line/Dept/Location
+  await seedHierarchy()
+
+  // 2. Seed columns_config per department
   const tasks = []
   if (mekanik) tasks.push(seedDepartmentMekanik(mekanik))
   if (elektrik) tasks.push(seedDepartmentElektrik(elektrik))
   await Promise.all(tasks)
+
+  // 3. Seed exception rules default
+  await seedCompletionRules()
 }
