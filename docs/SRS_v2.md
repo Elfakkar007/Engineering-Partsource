@@ -1,9 +1,11 @@
 # SRS v2.0 — Plant Sourcing App
 ### System Requirements Specification — Dynamic Config-Driven Engine
 
-**Versi:** 2.0
+**Versi:** 2.0 (revisi Sistem Pengkodean Item)
 **Menggantikan:** SRS v1.0 (`Spesifikasi_App_Plant_Sourcing.md`)
 **Status:** Draft siap-review untuk AI coding agent
+
+> **Catatan revisi:** §5.2, §7, §12.3, dan §15, beserta referensi terkait di §0/§3/§5.1, direvisi total menggantikan pendekatan *Dual-Matching Logic* (auto-generate kode) dengan **Manual-Assisted Matching** (kode hanya dibuat manual Admin lewat katalog Reference). Sumber perubahan: `Cuplikan_Sistem_Pengkodean_Item_Terbaru.md`. Bagian lain dokumen ini (arsitektur, sync, RBAC, dsb.) tidak terdampak dan tetap berlaku.
 
 ---
 
@@ -16,7 +18,7 @@
 | Skema data | 13 kolom Elektrik **hardcode di kode & Firestore doc** | **Dynamic Schema Grid Engine** — kolom didefinisikan sebagai data (`columns_config`), bukan kode |
 | Navigasi | 2-tier: Line → Location | **3-tier: Line → Department → Location** |
 | Cakupan Department | Implisit hanya "sourcing elektrik" | Eksplisit multi-department (Mekanik, Elektrik, Utility, dst — daftar terbuka, admin bisa tambah) |
-| Item Code | Tidak ada, kolom "Item Code" diisi manual pihak lain | **Dynamic Item Code Engine**: rule-based generator + catalog matching |
+| Item Code | Tidak ada, kolom "Item Code" diisi manual pihak lain | **Manual-Assisted Matching**: kode hanya dibuat manual Admin di katalog Reference; entry data cuma *mencocokkan* teks ke katalog (mode Auto/Manual per baris) — **tidak ada** auto-generate kode baru (lihat §7) |
 | Sinkronisasi eksternal | Tidak ada (export Excel manual) | **Dynamic Google Sheets Sync Engine** via Service Account, mapping kolom dikonfigurasi, bukan di-hardcode |
 | Aturan kelengkapan baris | Hardcode: "jika Status=Tidak Aktif maka Qty boleh kosong" | **Completion Exception Rules** — dikonfigurasi admin per Department, tidak menyebut nama kolom spesifik di kode |
 | Data Excel Mekanik 23 kolom | — (tidak ada di v1.0) | Diperlakukan sebagai **Initial Seed Data / Preset Default** untuk Department Mekanik saat instalasi, bukan skema tetap |
@@ -101,8 +103,8 @@ Spesifikasi v1.0 memiliki inkonsistensi pada kolom **Foto**: bagian arsitektur m
 
 | Role | Login? | Hak Akses |
 |---|---|---|
-| **Admin** | Ya | Full CRUD semua data, semua Line/Department/Location. Kelola akun PIC. Kelola `columns_config`, `item_code_rules`, `column_mappings` (Schema Manager, Rule Builder, Mapping Manager). Import/Export Excel. Konfigurasi Google Sheets sync. Restore recycle bin & hapus permanen. Lihat log aktivitas. |
-| **PIC Lapangan** (akun per Line, bisa lebih dari satu Line per akun) | Ya | CRUD (termasuk bulk) hanya pada `records` di Line yang menjadi tanggung jawabnya, lintas semua Department pada Line tersebut. Tidak bisa mengubah kolom yang ditandai `is_editable_by_pic=false` pada `columns_config`. Tidak bisa mengubah `columns_config`, `item_code_rules`, atau `column_mappings`. |
+| **Admin** | Ya | Full CRUD semua data, semua Line/Department/Location. Kelola akun PIC. Kelola `columns_config` (termasuk marker kolom pemicu/kunci pencarian/kolom Item Code — lihat §7), `reference_catalog`, `column_mappings` (Schema Manager, Konfigurasi Item Code, Mapping Manager). Import/Export Excel. Konfigurasi Google Sheets sync. Restore recycle bin & hapus permanen. Lihat log aktivitas. |
+| **PIC Lapangan** (akun per Line, bisa lebih dari satu Line per akun) | Ya | CRUD (termasuk bulk) hanya pada `records` di Line yang menjadi tanggung jawabnya, lintas semua Department pada Line tersebut. Tidak bisa mengubah kolom yang ditandai `is_editable_by_pic=false` pada `columns_config`. Tidak bisa mengubah `columns_config`, `reference_catalog`, atau `column_mappings`. |
 | **Publik** (internal perusahaan, tanpa login) | Tidak | Read-only ke endpoint agregat/ringkasan saja (lihat §12). Tidak ada akses ke `records` mentah maupun ke collection konfigurasi. |
 
 **Wajib diterapkan di level PocketBase API Rules** (server-side, setara Firestore Security Rules pada v1.0) — bukan hanya disembunyikan di UI. Contoh pola rule (bukan hardcode nama kolom, hanya kontrol akses collection & scope Line):
@@ -115,8 +117,8 @@ createRule / updateRule (PIC): sama seperti di atas, dan bukan soft-deleted
 deleteRule (PIC): "" (PIC tidak boleh hard-delete; soft-delete via updateRule field isDeleted)
 Admin: full akses via superuser / role check `@request.auth.role = "admin"`
 
-# Collection: columns_config, item_code_rules, column_mappings
-listRule/viewRule: authenticated (semua role login boleh baca, untuk render grid)
+# Collection: columns_config, reference_catalog, column_mappings
+listRule/viewRule: authenticated (semua role login boleh baca — dibutuhkan untuk render grid & matching Item Code offline)
 createRule/updateRule/deleteRule: `@request.auth.role = "admin"` saja
 ```
 
@@ -146,9 +148,9 @@ lines ──┐
         │
         ├──< locations >── departments ──< columns_config
         │        │                │
-        │        │                ├──< item_code_rules
         │        │                ├──< column_mappings
-        │        │                └──< completion_exception_rules
+        │        │                ├──< completion_exception_rules
+        │        │                └──< reference_catalog
         │        │
         │        └──< records (components: JSON, sesuai columns_config Department-nya)
         │
@@ -156,8 +158,10 @@ lines ──┐
 
 records ──< activity_log
 records ──< import_batches (via batch_id)
-records ──< reference_catalog (dicek saat is_ref_trigger)
 records ──< sync_queue_sheets (server-side, PocketBase)
+
+Catatan: `reference_catalog` adalah katalog milik Department (dibagi lintas Line/Location), bukan relasi per-baris `records` —
+dicocokkan on-the-fly saat kolom pemicu (`is_ref_trigger`) di suatu baris `records` berubah (lihat §7).
 ```
 
 ### 5.2 Definisi Collection / Tabel
@@ -185,19 +189,22 @@ records ──< sync_queue_sheets (server-side, PocketBase)
 | name | text | mis. "Boiler Room" |
 | order | number | |
 
-**`columns_config`** — jantung dari Dynamic Schema Grid Engine
+**`columns_config`** — jantung dari Dynamic Schema Grid Engine. Sejak revisi Item Code (§7), collection ini dipakai **dua arah**: mendefinisikan struktur `records.components` **dan** struktur `reference_catalog.components` per Department — keduanya independen, tidak dipaksa seragam.
 | Field | Tipe | Keterangan |
 |---|---|---|
 | id | string | |
 | department_id | relation → departments | skema berlaku untuk seluruh Location di Department ini |
-| key | text | key JSON di dalam `records.components`, mis. `"col_qty"` — **immutable setelah dipakai data** |
+| applies_to | select | `"records"` \| `"reference_catalog"` — menentukan entri ini mendefinisikan struktur kolom di `records.components` atau di `reference_catalog.components` Department ini |
+| key | text | key JSON di dalam `components` (records atau reference_catalog, sesuai `applies_to`), mis. `"col_qty"` — **immutable setelah dipakai data** |
 | label | text | label tampilan di header grid, boleh diubah kapan saja |
 | type | select | `text` \| `number` \| `select` \| `gdrive_link` |
 | select_options | JSON array | dipakai jika `type = select` |
-| is_required | boolean | apakah termasuk syarat kelengkapan baris |
+| is_required | boolean | apakah termasuk syarat kelengkapan baris (relevan hanya untuk `applies_to="records"`) |
 | is_visible | boolean | tampil/sembunyi di grid |
-| is_editable_by_pic | boolean | jika `false`, hanya Admin yang bisa mengisi (setara "4 kolom milik pihak lain" di v1.0) |
-| is_ref_trigger | boolean | jika `true`, perubahan nilai kolom ini memicu Catalog Reference Matching |
+| is_editable_by_pic | boolean | jika `false`, hanya Admin yang bisa mengisi (setara "4 kolom milik pihak lain" di v1.0) — relevan hanya untuk `applies_to="records"` |
+| is_ref_trigger | boolean | relevan hanya untuk `applies_to="records"` — jika `true`, kolom ini adalah **kolom pemicu** (satu per Department) yang mengaktifkan autocomplete & pencocokan Item Code ke `reference_catalog.search_key` (lihat §7) |
+| is_search_key | boolean | relevan hanya untuk `applies_to="reference_catalog"` — jika `true`, kolom ini adalah **kolom kunci pencarian** (satu per Department); nilainya disalin ke `reference_catalog.search_key` |
+| is_item_code_column | boolean | relevan hanya untuk `applies_to="records"` — jika `true`, kolom ini adalah target auto-fill/manual Item Code, dipasangkan dengan `records.item_code_mode` (lihat §7) |
 | order | number | urutan kolom di grid |
 
 **`records`** — baris data grid (generik, lintas Department)
@@ -209,6 +216,7 @@ records ──< sync_queue_sheets (server-side, PocketBase)
 | status_completeness | boolean (computed, disimpan agar cepat di-query) | dihitung ulang setiap `components` berubah |
 | flag | select, nullable | `null` \| `"perlu_ditanyakan"` \| `"dilewati"` |
 | flag_note | text, nullable | catatan opsional untuk flag |
+| item_code_mode | select | `"auto"` \| `"manual"` — toggle per baris untuk kolom Item Code (`columns_config.is_item_code_column=true`); bisa diganti kapan saja oleh user (lihat §7). Default `"auto"`. |
 | isDeleted | boolean | soft-delete |
 | deletedAt | datetime, nullable | |
 | createdBy / lastEditedBy | relation → users | |
@@ -217,37 +225,27 @@ records ──< sync_queue_sheets (server-side, PocketBase)
 
 > Catatan: field `components` inilah yang menggantikan seluruh kolom hardcode v1.0 (Sub-Machine, Category, Part, dst.). Data Excel Mekonik 23-kolom hanya dipakai sekali sebagai **seed** untuk mengisi `columns_config` (Department=Mekanik) dan sebagai data awal `records.components` saat instalasi — bukan struktur tetap di kode.
 
-**`item_code_rules`**
+> **`item_code_rules` dihapus dari cakupan.** Tidak ada lagi template generation (`{col_X}{seq:N}`), Rule Parser, maupun counter `next_seq` — lihat §7 untuk alasan & penggantinya.
+
+**`reference_catalog`** — katalog Item Code milik Department, diisi manual oleh Admin (upload file atau form satu per satu)
 | Field | Tipe | Keterangan |
 |---|---|---|
 | id | string | |
 | department_id | relation → departments | |
-| template | text | mis. `"{col_plant}{col_main_cat}{col_sub_cat}{seq:3}"` |
-| target_column_key | text | key di `components` yang diisi hasil generate, mis. `"col_item_code"` |
-| seq_scope | select | `"per_department"` \| `"per_template_prefix"` — menentukan cakupan reset counter |
-| next_seq | number | counter berjalan, di-increment atomik di server PocketBase saat generate |
-
-**Rule Parser — Template String:**
-- `{col_KEY}` → diganti nilai `components[col_KEY]` dari baris terkait (sanitasi: uppercase, strip spasi, sesuai konvensi kode part).
-- `{seq:N}` → nomor urut berjalan, zero-padded sepanjang N digit, sesuai `seq_scope`.
-- Karakter literal lain dalam template disalin apa adanya.
-- Parser dijalankan di server (PocketBase hook) agar increment `next_seq` atomik dan tidak bentrok antar-device offline yang sync bersamaan.
-
-**`reference_catalog`**
-| Field | Tipe | Keterangan |
-|---|---|---|
-| id | string | |
-| department_id | relation → departments | |
-| match_signature | JSON | pasangan key-value dari kolom `is_ref_trigger=true` yang dipakai sebagai kunci pencarian, mis. `{"col_specification": "Bearing 6204 ZZ"}` |
-| item_code | text | kode yang akan di-auto-fill jika cocok |
-| source | select | `"seed"` \| `"generated"` \| `"manual"` |
+| components | JSON | key-value bebas sesuai `columns_config` Department terkait dengan `applies_to="reference_catalog"`, mis. `{"col_main_category": "Bearing", "col_specification": "6204 ZZ"}` |
+| search_key | text | nilai dari kolom yang ditandai `is_search_key=true` di `components`, disalin ke sini untuk pencarian cepat; dinormalisasi (lowercase + rapikan spasi berlebih) |
+| item_code | text | kode item — **selalu diisi manual oleh Admin**, tidak pernah digenerate sistem |
+| source | select | `"upload"` \| `"manual"` |
 | created_at | datetime | |
 
-**Dual-Matching Logic (algoritma):**
-1. Saat nilai kolom dengan `is_ref_trigger=true` berubah (on blur), client membangun `match_signature` dari seluruh kolom trigger pada baris tersebut, lalu query `reference_catalog` (normalisasi: lowercase + trim sebelum dibandingkan).
-2. **Jika cocok** → `target_column_key` (dari `item_code_rules` Department terkait) di-auto-fill dari `reference_catalog.item_code`. Tidak ada pemanggilan formula.
-3. **Jika tidak cocok** (item baru) → saat baris disimpan/lengkap, sistem menjalankan Rule Parser dari `item_code_rules.template` untuk generate kode baru.
-4. Admin dapat menandai kode hasil generate untuk disimpan sebagai entry baru di `reference_catalog` (`source="generated"`) agar item sejenis berikutnya langsung match di langkah 2.
+**Manual-Assisted Matching Logic (algoritma):**
+1. Saat user mengetik di kolom pemicu (`columns_config.is_ref_trigger=true`, `applies_to="records"`) pada suatu baris `records`, sistem mencari secara real-time (client-side, terhadap `reference_catalog` yang sudah ter-cache di Dexie) ke `search_key` milik Department yang sama — pencarian **substring/mid-string** (cocok di mana pun dalam teks, bukan cuma awalan kata) — lalu menampilkannya sebagai daftar rekomendasi/autocomplete. User boleh memilih salah satu rekomendasi, atau tetap mengetik bebas.
+2. Kolom Item Code (`columns_config.is_item_code_column=true`, `applies_to="records"`) punya toggle **Mode Auto/Manual** per baris, disimpan di `records.item_code_mode`:
+   - **Mode Auto** (default): setiap kali nilai kolom pemicu berubah (on blur), sistem membandingkan teks tersebut (setelah normalisasi: lowercase + rapikan spasi berlebih) secara **exact-match** terhadap `search_key` seluruh entri `reference_catalog` Department yang sama. Cocok → kolom Item Code di-auto-fill dari `reference_catalog.item_code` entri yang cocok. Tidak cocok → kolom Item Code dikosongkan (NaN).
+   - **Mode Manual**: kolom Item Code dapat diisi bebas oleh user, mengabaikan hasil pencocokan sepenuhnya.
+   - Toggle dapat dipindah kapan saja oleh user yang mengisi data (tetap tunduk pada `is_editable_by_pic` seperti kolom lain).
+3. **Tidak ada proses generate kode baru secara otomatis dalam kondisi apapun.** Entri `reference_catalog` baru (termasuk `item_code`-nya) hanya dibuat manual oleh Admin — satu per satu lewat form, atau lewat upload file Reference.
+4. Laporan **"Belum Ketemu Kode"** (§7) membantu Admin menemukan baris `records` yang kolom pemicunya tidak cocok dengan entri manapun di `reference_catalog`, sebagai sinyal part mana yang perlu ditambahkan ke katalog.
 
 **`column_mappings`**
 | Field | Tipe | Keterangan |
@@ -329,14 +327,33 @@ records ──< sync_queue_sheets (server-side, PocketBase)
 
 ---
 
-## 7. Dynamic Item Code Engine
+## 7. Item Code — Manual-Assisted Matching
 
-Lihat §5.2 untuk skema `item_code_rules` & `reference_catalog`, serta algoritma Dual-Matching. Kebutuhan UI (Rule Builder) dijelaskan di `DESIGN_v2.md`.
+*(sebelumnya "Dynamic Item Code Engine" — nama & pendekatan diganti total, lihat catatan revisi di §0)*
 
-Ketentuan tambahan:
-- Formula per Department disimpan sebagai *string template*, sehingga tim non-developer (Admin) dapat menyusun ulang format kode tanpa bantuan programmer.
-- Validasi template dilakukan saat disimpan: setiap `{col_X}` harus merujuk `key` yang benar-benar ada di `columns_config` Department tersebut; jika tidak, disimpan sebagai error dan template ditolak.
-- Increment `next_seq` **harus** terjadi di server (PocketBase hook), bukan di client, untuk menghindari duplikasi kode saat dua device offline sync hampir bersamaan.
+Lihat §5.2 untuk skema `columns_config` (field `applies_to`, `is_ref_trigger`, `is_search_key`, `is_item_code_column`), `reference_catalog`, `records.item_code_mode`, serta algoritma Manual-Assisted Matching. Kebutuhan UI (menu "Konfigurasi Item Code", form tambah entri Reference) dijelaskan di `DESIGN_v2.md`.
+
+**Prinsip utama:**
+- Sistem **tidak pernah** membuat kode item baru secara otomatis. Kode baru selalu satu pintu: dibuat manual oleh Admin di `reference_catalog`.
+- Pencocokan berbasis **satu kolom kunci pencarian** (full-text/substring) per Department — bukan pencarian bertingkat/kategori — dan mekanismenya sama untuk semua Department (tidak ada logic khusus per Department di kode).
+- Struktur kolom `reference_catalog` per Department **tidak dipaksa seragam** dengan struktur `records` Department yang sama (contoh nyata: Mekanik pakai kombinasi Main Category + Specification sebagai kunci pencarian; Elektrik pakai kolom Description apa adanya dari data lama hasil export sistem lain).
+- Item Code punya dua mode per baris (Auto/Manual), bisa dipindah kapan saja oleh user (§5.2).
+
+**Konfigurasi per Department** (menu "Konfigurasi Item Code", Admin only):
+- Menandai kolom `records` mana yang jadi **kolom pemicu** (`is_ref_trigger=true`) — nama kolom tidak di-hardcode, ditentukan Admin (mis. "Spesifikasi" di Mekanik, "Spesification" di Elektrik).
+- Menandai kolom `reference_catalog` mana yang jadi **kolom kunci pencarian** (`is_search_key=true`).
+- Menandai kolom `records` mana yang jadi **kolom Item Code** (`is_item_code_column=true`).
+- Upload file Reference (bulk) atau tambah entri satu per satu lewat form, per Department.
+
+**Yang dihapus dari cakupan (dibanding SRS v2.0 sebelum revisi ini):**
+- Template Generation (`item_code_rules.template`, pola `{col_X}{seq:N}`) dan seluruh Rule Parser.
+- Penomoran urut otomatis di client.
+- Increment atomik `next_seq` di server (PocketBase hook) — sebelumnya jadi gap backend terbesar; sekarang tidak relevan karena tidak ada lagi dua pekerja offline yang bisa menebak nomor urut secara bersamaan (kode baru dibuat satu pintu oleh Admin).
+
+**Laporan "Belum Ketemu Kode" (Admin):**
+Daftar baris `records` yang kolom pemicunya tidak cocok dengan entri manapun di `reference_catalog` Department terkait (Mode Auto menghasilkan NaN). Dipakai Admin untuk menentukan part mana yang perlu ditambahkan ke katalog.
+
+**Offline-first:** `reference_catalog` (dan daftar rekomendasi turunannya) tetap disimpan offline di perangkat (Dexie cache), sesuai prinsip dasar §2 — pencarian & pencocokan tetap berjalan tanpa koneksi.
 
 ---
 
@@ -463,7 +480,6 @@ POST   /api/collections/columns_config/records    # Admin only, via API Rule
 Realtime: client subscribe ke `columns_config` dan `records` (scoped ke Line miliknya) via PocketBase Realtime API agar perubahan skema/kolom oleh Admin, atau data dari PIC lain, langsung terlihat tanpa refresh manual.
 
 **Custom Server-Side Hooks** (PocketBase Go/JS hooks) dibutuhkan untuk:
-- Increment atomik `item_code_rules.next_seq` saat generate kode baru.
 - Menghitung ulang `records.status_completeness` setiap `components` atau `columns_config`/`completion_exception_rules` terkait berubah.
 - Menulis entry baru ke `sync_queue_sheets` setiap `records` berubah (create/update yang relevan dengan `column_mappings` Department terkait).
 - Menjalankan Debounce/Batch Push Worker (cron internal PocketBase) untuk proses §8.
@@ -497,37 +513,51 @@ Realtime: client subscribe ke `columns_config` dan `records` (scoped ke Line mil
 
 ## 15. Lampiran — Contoh JSON
 
-**Contoh `columns_config` (2 entri, Department Elektrik):**
+**Contoh `columns_config` — struktur `records`, Department Elektrik (3 dari 13 kolom):**
 ```json
 [
-  { "key": "col_submachine", "label": "Sub-Machine", "type": "text",
-    "is_required": true, "is_visible": true, "is_editable_by_pic": true, "is_ref_trigger": false, "order": 1 },
-  { "key": "col_qty", "label": "Qty", "type": "number",
-    "is_required": true, "is_visible": true, "is_editable_by_pic": true, "is_ref_trigger": false, "order": 6 }
+  { "key": "col_submachine", "label": "Sub-Machine", "type": "text", "applies_to": "records",
+    "is_required": true, "is_visible": true, "is_editable_by_pic": true, "is_ref_trigger": false, "is_item_code_column": false, "order": 1 },
+  { "key": "col_specification", "label": "Spesification", "type": "text", "applies_to": "records",
+    "is_required": true, "is_visible": true, "is_editable_by_pic": true, "is_ref_trigger": true, "is_item_code_column": false, "order": 4 },
+  { "key": "col_item_code", "label": "Item Code", "type": "text", "applies_to": "records",
+    "is_required": false, "is_visible": true, "is_editable_by_pic": true, "is_ref_trigger": false, "is_item_code_column": true, "order": 7 }
 ]
 ```
 
-**Contoh `item_code_rules` (Department Mekanik):**
+**Contoh `columns_config` — struktur `reference_catalog`, Department Elektrik (beda dari struktur `records`-nya karena data lama hasil export sistem lain):**
+```json
+[
+  { "key": "ref_description", "label": "Description", "type": "text", "applies_to": "reference_catalog",
+    "is_search_key": true, "order": 1 }
+]
+```
+
+**Contoh entri `reference_catalog` (Department Elektrik):**
 ```json
 {
-  "department_id": "dept_mekanik",
-  "template": "{col_plant}{col_main_cat}{col_sub_cat}{seq:3}",
-  "target_column_key": "col_item_code",
-  "seq_scope": "per_template_prefix",
-  "next_seq": 42
+  "department_id": "dept_elektrik",
+  "components": { "ref_description": "Proximity Switch PNP NO 24VDC" },
+  "search_key": "proximity switch pnp no 24vdc",
+  "item_code": "ELK-SNS-0142",
+  "source": "manual"
 }
 ```
 
-**Contoh `records.components` (Department Elektrik, satu baris):**
+**Contoh `records` (satu baris, Department Elektrik) — perhatikan `item_code_mode` di luar `components`:**
 ```json
 {
-  "col_submachine": "Conveyor A",
-  "col_category": "Sensor",
-  "col_part": "Proximity Switch",
-  "col_specification": "PNP NO, 24VDC",
-  "col_status": "Existing",
-  "col_qty": 2,
-  "col_foto": "https://drive.google.com/file/d/xxxx/view"
+  "components": {
+    "col_submachine": "Conveyor A",
+    "col_category": "Sensor",
+    "col_part": "Proximity Switch",
+    "col_specification": "PNP NO, 24VDC",
+    "col_status": "Existing",
+    "col_qty": 2,
+    "col_item_code": "ELK-SNS-0142",
+    "col_foto": "https://drive.google.com/file/d/xxxx/view"
+  },
+  "item_code_mode": "auto"
 }
 ```
 

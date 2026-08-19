@@ -354,7 +354,7 @@ export default function DataGrid({ locationName, canEdit }) {
 
   // Dynamic schema and data hooks
   const { columns } = useDynamicSchema(activeDepartmentId)
-  const { rows, isLoading, addRow, bulkAddRows, updateCell, updateFlag, deleteRow, bulkDeleteRows, bulkFillColumn } = useGridData(activeLocationId, activeDepartmentId)
+  const { rows, isLoading, addRow, bulkAddRows, updateCell, updateFlag, updateItemCodeMode, deleteRow, bulkDeleteRows, bulkFillColumn } = useGridData(activeLocationId, activeDepartmentId)
   // Aturan pengecualian kelengkapan — diambil live dari Dexie, reaktif saat Admin mengubah rules
   const exceptionRules = useLiveExceptionRules(activeDepartmentId)
 
@@ -834,6 +834,12 @@ export default function DataGrid({ locationName, canEdit }) {
                         canEdit={canEdit}
                         onSave={handleSaveCell}
                         highlight={isSelected || copyColKey === col.key}
+                        itemCodeMode={col.is_item_code_column ? (row.item_code_mode ?? 'auto') : undefined}
+                        onToggleMode={col.is_item_code_column ? async (rId, newMode) => {
+                          try { await updateItemCodeMode(rId, newMode, userId) }
+                          catch (e) { console.error('[DataGrid] updateItemCodeMode:', e) }
+                        } : undefined}
+                        departmentId={activeDepartmentId}
                       />
                     ))}
 

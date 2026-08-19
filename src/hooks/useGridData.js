@@ -25,7 +25,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../lib/db'
 import { triggerSync } from '../lib/syncWorker'
-import { matchReferenceCode, generateItemCode } from '../lib/itemCodeEngine'
+import { applyItemCodeMatching } from '../lib/itemCodeEngine'
 import { enqueueSheetSync } from '../lib/sheetsSync'
 
 /* ------------------------------------------------------------------ */
@@ -181,8 +181,9 @@ export function useGridData(locationId, departmentId) {
 
   /**
    * Update nilai satu sel (satu key dalam `components` JSON).
-   * Jika kolom memiliki is_ref_trigger=true, jalankan Reference Catalog Matching.
-   * Jika tidak ada match di catalog, generate item code dari template rule.
+   * Jika kolom adalah is_ref_trigger=true DAN baris.item_code_mode='auto',
+   * jalankan Manual-Assisted Matching ke reference_catalog dan auto-fill/kosongkan
+   * kolom is_item_code_column=true (SRS v2.0 §7).
    * Atomik: update Dexie + daftarkan ke sync_queue bersamaan.
    *
    * @param {number} rowId       - Dexie local ID baris
@@ -201,40 +202,28 @@ export function useGridData(locationId, departmentId) {
 
       let updatedComponents = { ...row.components, [colKey]: value }
 
-      // ---- Item Code Engine: ref_trigger check ----
-      // Jalankan matching jika kolom ini bertanda is_ref_trigger=true
-      const isRefTrigger = colMeta?.is_ref_trigger === true
-      if (isRefTrigger && value) {
-        try {
-          const matchResult = await matchReferenceCode(colKey, value, row.department_id)
-          if (matchResult.matched && matchResult.item_code) {
-            // Temukan target_column_key dari item_code_rules department ini
-            const rule = await db.item_code_rules
-              .where('department_id').equals(row.department_id).first()
-            const targetKey = rule?.target_column_key
-            if (targetKey && targetKey !== colKey) {
-              // Auto-fill kolom kode material (is_auto: true)
-              updatedComponents = { ...updatedComponents, [targetKey]: matchResult.item_code }
-            }
-          } else if (!matchResult.matched) {
-            // Tidak ada match di catalog 鈫?generate kode baru dari template
-            const generatedCode = await generateItemCode(
-              { ...row, components: updatedComponents },
-              row.department_id
-            )
-            if (generatedCode) {
-              const rule = await db.item_code_rules
-                .where('department_id').equals(row.department_id).first()
-              const targetKey = rule?.target_column_key
-              if (targetKey && !updatedComponents[targetKey]) {
-                updatedComponents = { ...updatedComponents, [targetKey]: generatedCode }
-              }
-            }
-          }
-        } catch (engineErr) {
-          // Engine error tidak boleh menghentikan save
-          console.warn('[useGridData] itemCodeEngine error (non-blocking):', engineErr)
+      // ---- Item Code: Manual-Assisted Matching (SRS v2.0 §7) ----
+      // Jika kolom yang berubah adalah kolom pemicu (is_ref_trigger=true) dan
+      // baris berada di mode Auto, cocokkan nilai ke reference_catalog.search_key
+      // lalu auto-fill atau kosongkan kolom Item Code (is_item_code_column=true).
+      // Seluruh query offline-first via Dexie — tidak menyentuh PocketBase.
+      try {
+        const allColumns = await db.columns_config
+          .where('department_id')
+          .equals(row.department_id)
+          .toArray()
+        const itemCodePatch = await applyItemCodeMatching(
+          { ...row, item_code_mode: row.item_code_mode ?? 'auto' },
+          colKey,
+          value,
+          allColumns
+        )
+        if (itemCodePatch) {
+          updatedComponents = { ...updatedComponents, ...itemCodePatch }
         }
+      } catch (matchErr) {
+        // Matching error tidak boleh menghentikan save
+        console.warn('[useGridData] applyItemCodeMatching error (non-blocking):', matchErr)
       }
 
       // Update Dexie
@@ -467,6 +456,45 @@ export function useGridData(locationId, departmentId) {
     return newIds
   }
 
+  /* ------------------------------------------------------------------ */
+  /*  UPDATE item_code_mode per baris (Auto / Manual)                    */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Toggle mode kode item per baris antara 'auto' dan 'manual'.
+   * Disimpan sebagai field top-level `item_code_mode` di record (bukan di components).
+   * Jika dirubah ke 'auto', matching akan berjalan otomatis saat kolom pemicu berubah.
+   *
+   * @param {number} rowId    - Dexie local ID baris
+   * @param {'auto'|'manual'} mode - mode baru
+   * @param {string} [editedBy]
+   */
+  async function updateItemCodeMode(rowId, mode, editedBy = '') {
+    const now = nowISO()
+
+    await db.transaction('rw', [db.records, db.sync_queue], async () => {
+      const row = await db.records.get(rowId)
+      if (!row) throw new Error(`Baris ID ${rowId} tidak ditemukan`)
+
+      await db.records.update(rowId, {
+        item_code_mode: mode,
+        last_edited_by: editedBy,
+        lastUpdated: now,
+        sync_status: 'pending',
+      })
+
+      const payload = {
+        id: rowId,
+        pb_id: row.pb_id,
+        item_code_mode: mode,
+        lastUpdated: now,
+      }
+      await db.sync_queue.add(makeSyncEntry('update', rowId, payload, row.pb_id))
+    })
+
+    triggerSync()
+  }
+
   return {
     rows: rows || [],
     isLoading: rows === undefined,
@@ -474,6 +502,7 @@ export function useGridData(locationId, departmentId) {
     bulkAddRows,
     updateCell,
     updateFlag,
+    updateItemCodeMode,
     deleteRow,
     bulkDeleteRows,
     bulkFillColumn,

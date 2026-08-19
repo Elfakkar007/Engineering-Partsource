@@ -32,8 +32,11 @@ const TYPE_OPTIONS = [
 function AddColumnForm({ departmentId, onSaved, onCancel }) {
   const [label, setLabel] = useState('')
   const [type, setType] = useState('text')
+  const [appliesTo, setAppliesTo] = useState('records')
   const [isRequired, setIsRequired] = useState(false)
   const [isRefTrigger, setIsRefTrigger] = useState(false)
+  const [isItemCodeColumn, setIsItemCodeColumn] = useState(false)
+  const [isSearchKey, setIsSearchKey] = useState(false)
   const [isEditableByPic, setIsEditableByPic] = useState(true)
   const [selectOptions, setSelectOptions] = useState([{ value: '', tone: 'neutral' }])
   const [saving, setSaving] = useState(false)
@@ -62,9 +65,12 @@ function AddColumnForm({ departmentId, onSaved, onCancel }) {
       await addColumn({
         label: label.trim(),
         type,
-        is_required: isRequired,
-        is_ref_trigger: isRefTrigger,
-        is_editable_by_pic: isEditableByPic,
+        applies_to: appliesTo,
+        is_required: appliesTo === 'records' ? isRequired : false,
+        is_ref_trigger: appliesTo === 'records' ? isRefTrigger : false,
+        is_item_code_column: appliesTo === 'records' ? isItemCodeColumn : false,
+        is_search_key: appliesTo === 'reference_catalog' ? isSearchKey : false,
+        is_editable_by_pic: appliesTo === 'records' ? isEditableByPic : false,
         is_visible: true,
         select_options: type === 'select' ? selectOptions.filter(o => o.value.trim()) : [],
       })
@@ -101,6 +107,25 @@ function AddColumnForm({ departmentId, onSaved, onCancel }) {
           </div>
         </div>
 
+        {/* applies_to selector */}
+        <div style={{ marginBottom: '12px', padding: '10px 14px', background: '#fff3e0', borderRadius: '8px', border: '1px solid #f9d980' }}>
+          <p style={{ margin: '0 0 8px', fontSize: '12px', fontWeight: 600, color: '#b06000' }}>Kolom ini dipakai untuk:</p>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            {[
+              { val: 'records', label: '📋 Records (data grid)' },
+              { val: 'reference_catalog', label: '📖 Reference Catalog (kamus kode item)' },
+            ].map(opt => (
+              <label key={opt.val} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', color: '#1f2328' }}>
+                <input type="radio" name="applies_to_new" value={opt.val}
+                  checked={appliesTo === opt.val}
+                  onChange={() => setAppliesTo(opt.val)}
+                  style={{ accentColor: '#188038' }} />
+                {opt.label}
+              </label>
+            ))}
+          </div>
+        </div>
+
         {/* Select options */}
         {type === 'select' && (
           <div style={{ marginBottom: '12px', padding: '12px', background: '#fff', borderRadius: '8px', border: '1px solid #e8eaed' }}>
@@ -127,11 +152,12 @@ function AddColumnForm({ departmentId, onSaved, onCancel }) {
           </div>
         )}
 
-        {/* Flags */}
-        <div style={{ display: 'flex', gap: '20px', marginBottom: '14px', flexWrap: 'wrap' }}>
-          {[
+        {/* Flags — tampil sesuai applies_to */}
+        <div style={{ display: 'flex', gap: '16px', marginBottom: '14px', flexWrap: 'wrap' }}>
+          {appliesTo === 'records' && [
             { val: isRequired, set: setIsRequired, label: 'Wajib diisi' },
             { val: isRefTrigger, set: setIsRefTrigger, label: 'Pemicu Kode (Ref Trigger)' },
+            { val: isItemCodeColumn, set: setIsItemCodeColumn, label: 'Kolom Item Code' },
             { val: !isEditableByPic, set: v => setIsEditableByPic(!v), label: 'Hanya Admin (readonly PIC)' },
           ].map(({ val, set, label: lbl }) => (
             <label key={lbl} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', color: '#1f2328' }}>
@@ -139,6 +165,12 @@ function AddColumnForm({ departmentId, onSaved, onCancel }) {
               {lbl}
             </label>
           ))}
+          {appliesTo === 'reference_catalog' && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', color: '#1f2328' }}>
+              <input type="checkbox" checked={isSearchKey} onChange={e => setIsSearchKey(e.target.checked)} style={{ accentColor: '#188038' }} />
+              Kunci Pencarian (search_key)
+            </label>
+          )}
         </div>
 
         {error && <p style={{ color: '#d93025', fontSize: '12px', marginBottom: '10px' }}>{error}</p>}
@@ -242,13 +274,18 @@ function EditColumnRow({ col, onSave, onCancel }) {
 export default function SchemaBuilder({ userId = '' }) {
   const departments = useLiveQuery(() => db.departments_cache.toArray(), [], [])
   const [activeDeptId, setActiveDeptId] = useState(null)
+  const [activeTab, setActiveTab] = useState('records') // 'records' | 'reference_catalog'
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingColId, setEditingColId] = useState(null)
   const { addToast } = useToast()
 
   const effectiveDeptId = activeDeptId || departments?.[0]?.id || null
-
   const { allColumns, isLoading, updateColumn, removeColumn, reorderColumns } = useDynamicSchema(effectiveDeptId)
+
+  // Pisahkan berdasarkan applies_to
+  const recordsCols = (allColumns || []).filter(c => !c.applies_to || c.applies_to === 'records')
+  const refCols = (allColumns || []).filter(c => c.applies_to === 'reference_catalog')
+  const displayedCols = activeTab === 'records' ? recordsCols : refCols
 
   async function handleToggleVisible(col) {
     await updateColumn(col.id, { is_visible: col.is_visible === false ? true : false })
@@ -275,14 +312,14 @@ export default function SchemaBuilder({ userId = '' }) {
 
   async function handleMoveUp(col, idx) {
     if (idx === 0) return
-    const ids = allColumns.map(c => c.id)
+    const ids = displayedCols.map(c => c.id)
     ;[ids[idx - 1], ids[idx]] = [ids[idx], ids[idx - 1]]
     await reorderColumns(ids)
   }
 
   async function handleMoveDown(col, idx) {
-    if (idx === allColumns.length - 1) return
-    const ids = allColumns.map(c => c.id)
+    if (idx === displayedCols.length - 1) return
+    const ids = displayedCols.map(c => c.id)
     ;[ids[idx], ids[idx + 1]] = [ids[idx + 1], ids[idx]]
     await reorderColumns(ids)
   }
@@ -310,10 +347,28 @@ export default function SchemaBuilder({ userId = '' }) {
 
       {effectiveDeptId && (
         <>
+          {/* Tab: Records vs Reference Catalog */}
+          <div style={{ display: 'flex', gap: '0', marginBottom: '12px', borderBottom: '2px solid #e8eaed' }}>
+            {[
+              { val: 'records', label: `📋 Records (${recordsCols.length})` },
+              { val: 'reference_catalog', label: `📖 Ref Catalog (${refCols.length})` },
+            ].map(tab => (
+              <button key={tab.val} onClick={() => { setActiveTab(tab.val); setShowAddForm(false); setEditingColId(null) }}
+                style={{
+                  padding: '7px 18px', fontSize: '13px', fontWeight: 500, cursor: 'pointer',
+                  background: 'none', border: 'none', borderBottom: `2px solid ${activeTab === tab.val ? '#1a73e8' : 'transparent'}`,
+                  color: activeTab === tab.val ? '#1a73e8' : '#5f6368',
+                  marginBottom: '-2px',
+                }}>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
           {/* Add Column Button */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <p style={{ margin: 0, fontSize: '13px', color: '#5f6368' }}>
-              {allColumns.length} kolom terdefinisi
+              {displayedCols.length} kolom {activeTab === 'records' ? 'Records' : 'Reference Catalog'}
             </p>
             <button className="btn-primary" style={{ padding: '6px 16px', fontSize: '13px' }}
               onClick={() => setShowAddForm(v => !v)}>
@@ -332,10 +387,10 @@ export default function SchemaBuilder({ userId = '' }) {
           {/* Columns Table */}
           {isLoading ? (
             <p style={{ textAlign: 'center', color: '#80868b', padding: '24px' }}>Memuat skema...</p>
-          ) : allColumns.length === 0 ? (
+          ) : displayedCols.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px', color: '#80868b' }}>
-              <p>Belum ada kolom untuk Department ini.</p>
-              <p style={{ fontSize: '12px' }}>Klik "+ Tambah Kolom" untuk mulai.</p>
+              <p>Belum ada kolom {activeTab === 'records' ? 'Records' : 'Reference Catalog'} untuk Department ini.</p>
+              <p style={{ fontSize: '12px' }}>Klik "+ Tambah Kolom" dan pilih jenis kolom yang sesuai.</p>
             </div>
           ) : (
             <div style={{ border: '1px solid #dadce0', borderRadius: '8px', overflow: 'hidden' }}>
@@ -352,7 +407,7 @@ export default function SchemaBuilder({ userId = '' }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {allColumns.map((col, idx) => {
+                  {displayedCols.map((col, idx) => {
                     if (editingColId === col.id) {
                       return (
                         <EditColumnRow
@@ -381,7 +436,9 @@ export default function SchemaBuilder({ userId = '' }) {
                         <td style={{ padding: '8px 10px', fontWeight: 500, color: '#1f2328' }}>
                           {col.label}
                           {col.is_auto && <span style={{ marginLeft: '6px', fontSize: '10px', padding: '1px 5px', borderRadius: '8px', background: '#fef7e0', color: '#b06000' }}>auto</span>}
-                          {col.is_ref_trigger && <span style={{ marginLeft: '4px', fontSize: '10px', padding: '1px 5px', borderRadius: '8px', background: '#e8f0fe', color: '#1a73e8' }}>ref</span>}
+                          {col.is_ref_trigger && <span style={{ marginLeft: '4px', fontSize: '10px', padding: '1px 5px', borderRadius: '8px', background: '#e8f0fe', color: '#1a73e8' }}>pemicu</span>}
+                          {col.is_item_code_column && <span style={{ marginLeft: '4px', fontSize: '10px', padding: '1px 5px', borderRadius: '8px', background: '#e6f4ea', color: '#188038' }}>item code</span>}
+                          {col.is_search_key && <span style={{ marginLeft: '4px', fontSize: '10px', padding: '1px 5px', borderRadius: '8px', background: '#fef7e0', color: '#b06000' }}>search_key</span>}
                         </td>
                         <td style={{ padding: '8px 10px' }}>
                           <code style={{ fontSize: '11px', background: '#f1f3f4', padding: '1px 6px', borderRadius: '3px', color: '#5f6368' }}>{col.key}</code>

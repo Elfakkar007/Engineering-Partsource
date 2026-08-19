@@ -1,25 +1,31 @@
 /**
  * EditableCell.jsx
  *
- * Generic inline-edit cell renderer yang 100% config-driven dari columns_config.
+ * Generic inline-edit cell renderer, 100% config-driven dari columns_config.
  *
- * Tipe yang didukung (SRS v2.0 §4):
- *   'text'        → textarea (auto-resize)
- *   'number'      → input[type=number]
- *   'select'      → dropdown dari column.select_options
- *   'gdrive_link' → GdrivePreview (Portal hover/tap preview)
+ * Tipe yang didukung (SRS v2.0 par.4):
+ *   text        -> textarea (auto-resize)
+ *   number      -> input[type=number]
+ *   select      -> dropdown dari column.select_options
+ *   gdrive_link -> GdrivePreview (Portal hover/tap preview)
  *
- * Properti kolom khusus:
- *   is_readonly: true → sel tidak bisa diedit manual dari grid (mis. col_4 Code Material)
- *
- * DESIGN_v2.md §3 — editable-cell
+ * Perilaku khusus (Tahap 8d - SRS v2.0 par.7):
+ *   is_item_code_column = true
+ *     -> Tampilkan toggle Auto/Manual di sudut kanan atas sel.
+ *        Mode Auto (item_code_mode='auto') -> sel read-only, nilai hasil matching.
+ *        Mode Manual (item_code_mode='manual') -> sel bisa diedit bebas.
+ *   is_ref_trigger = true
+ *     -> Saat editing, tampilkan autocomplete dropdown dari getSuggestions()
+ *        (substring search ke reference_catalog Dexie, offline-first).
+ *        User klik rekomendasi -> nilai langsung di-commit + dropdown tutup.
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import GdrivePreview from './GdrivePreview'
+import { getSuggestions } from '../../lib/itemCodeEngine'
 
 /* ------------------------------------------------------------------ */
-/*  Save indicator — ✓ kecil yang muncul sesaat setelah simpan         */
+/*  Save indicator - centang kecil muncul sesaat setelah simpan        */
 /* ------------------------------------------------------------------ */
 function SaveIndicator() {
   return (
@@ -37,7 +43,7 @@ function SaveIndicator() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Chip for select columns                                             */
+/*  SelectChip - chip berwarna untuk kolom type=select                  */
 /* ------------------------------------------------------------------ */
 function SelectChip({ value, options }) {
   const opt = options?.find(o => (typeof o === 'string' ? o : o.value) === value)
@@ -51,15 +57,75 @@ function SelectChip({ value, options }) {
     default:  { background: '#e8f0fe', color: '#1a73e8' },
   }
 
-  const style = toneStyle[tone] || toneStyle.default
-
   return (
     <span style={{
       display: 'inline-block', padding: '1px 7px', borderRadius: '10px',
-      fontSize: '11px', fontWeight: 500, ...style,
+      fontSize: '11px', fontWeight: 500, ...(toneStyle[tone] || toneStyle.default),
     }}>
       {value}
     </span>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  AutocompleteDropdown - untuk kolom is_ref_trigger                   */
+/* ------------------------------------------------------------------ */
+function AutocompleteDropdown({ suggestions, onSelect, onClose }) {
+  if (!suggestions || suggestions.length === 0) return null
+
+  return (
+    <div style={{
+      position: 'absolute', top: '100%', left: 0, right: 0,
+      background: '#fff', border: '1px solid #1a73e8',
+      borderTop: 'none', borderRadius: '0 0 6px 6px',
+      boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+      zIndex: 200, maxHeight: '180px', overflowY: 'auto',
+    }}>
+      {suggestions.map(s => (
+        <div
+          key={s.id}
+          onMouseDown={e => { e.preventDefault(); onSelect(s) }}
+          style={{
+            padding: '6px 10px', cursor: 'pointer', fontSize: '12px',
+            borderBottom: '1px solid #f1f3f4',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = '#f0f7ff'}
+          onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+        >
+          <span style={{ color: '#1f2328' }}>{s.search_key}</span>
+          <code style={{ fontSize: '11px', color: '#188038', fontFamily: 'monospace', marginLeft: '8px' }}>
+            {s.item_code}
+          </code>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  ItemCodeModeToggle - badge toggle Auto/Manual                       */
+/* ------------------------------------------------------------------ */
+function ItemCodeModeToggle({ mode, canToggle, onToggle }) {
+  const isAuto = (mode ?? 'auto') === 'auto'
+  return (
+    <button
+      title={isAuto ? 'Mode Auto: klik untuk Manual (edit bebas)' : 'Mode Manual: klik untuk Auto (hasil matching)'}
+      disabled={!canToggle}
+      onClick={e => { e.stopPropagation(); onToggle(isAuto ? 'manual' : 'auto') }}
+      style={{
+        position: 'absolute', top: '2px', left: '3px',
+        fontSize: '9px', lineHeight: 1, fontWeight: 700,
+        padding: '1px 5px', borderRadius: '6px', cursor: canToggle ? 'pointer' : 'default',
+        border: 'none',
+        background: isAuto ? '#e6f4ea' : '#fef7e0',
+        color: isAuto ? '#188038' : '#b06000',
+        zIndex: 5,
+        letterSpacing: '0.02em',
+      }}
+    >
+      {isAuto ? 'AUTO' : 'MNL'}
+    </button>
   )
 }
 
@@ -68,24 +134,42 @@ function SelectChip({ value, options }) {
 /* ------------------------------------------------------------------ */
 /**
  * @param {Object}   props
- * @param {*}        props.value         - nilai sel saat ini
- * @param {Object}   props.column        - kolom dari useDynamicSchema: { key, type, label, select_options, is_readonly, width }
- * @param {number}   props.rowId         - Dexie ID baris
- * @param {boolean}  props.canEdit       - permission edit
- * @param {Function} props.onSave        - async (rowId, colKey, value) => void
- * @param {boolean}  [props.highlight]   - highlight latar (mis. saat baris dipilih)
+ * @param {*}        props.value               - nilai sel saat ini
+ * @param {Object}   props.column              - kolom dari useDynamicSchema
+ * @param {number}   props.rowId               - Dexie ID baris
+ * @param {boolean}  props.canEdit             - permission edit
+ * @param {Function} props.onSave              - async (rowId, colKey, value) => void
+ * @param {boolean}  [props.highlight]         - highlight latar
+ * @param {string}   [props.itemCodeMode]      - 'auto'|'manual' (hanya untuk is_item_code_column)
+ * @param {Function} [props.onToggleMode]      - async (rowId, newMode) => void
+ * @param {string}   [props.departmentId]      - diperlukan untuk autocomplete is_ref_trigger
  */
-export default function EditableCell({ value, column, rowId, canEdit, onSave, highlight }) {
+export default function EditableCell({
+  value, column, rowId, canEdit, onSave, highlight,
+  itemCodeMode, onToggleMode, departmentId,
+}) {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
   const [showSaved, setShowSaved] = useState(false)
+  const [suggestions, setSuggestions] = useState([])
   const inputRef = useRef(null)
   const timerRef = useRef(null)
 
-  const { key: colKey, type = 'text', is_readonly = false, select_options = [] } = column
+  const {
+    key: colKey,
+    type = 'text',
+    is_readonly = false,
+    select_options = [],
+    is_item_code_column = false,
+    is_ref_trigger = false,
+  } = column
 
-  // Readonly cells: canEdit tapi kolom dikunci — is_readonly override
-  const effectiveCanEdit = canEdit && !is_readonly
+  // Kolom item code mode Auto -> read-only (matching engine yang mengisi)
+  const effectiveMode = is_item_code_column ? (itemCodeMode ?? 'auto') : null
+  const isItemCodeAutoMode = is_item_code_column && effectiveMode === 'auto'
+
+  // Readonly efektif: is_readonly kolom, atau kolom item code dalam mode auto
+  const effectiveCanEdit = canEdit && !is_readonly && !isItemCodeAutoMode
 
   const displayValue = (value === null || value === undefined || value === '') ? null : value
 
@@ -108,8 +192,18 @@ export default function EditableCell({ value, column, rowId, canEdit, onSave, hi
 
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current) }, [])
 
+  // Autocomplete: fetch suggestions saat user mengetik di kolom ref_trigger
+  const fetchSuggestions = useCallback(async (text) => {
+    if (!is_ref_trigger || !departmentId || !text.trim()) {
+      setSuggestions([]); return
+    }
+    const results = await getSuggestions(text, departmentId, 8)
+    setSuggestions(results)
+  }, [is_ref_trigger, departmentId])
+
   async function commit(overrideValue) {
     setIsEditing(false)
+    setSuggestions([])
     let newValue = overrideValue !== undefined ? overrideValue : editValue
     if (type === 'number') newValue = newValue === '' ? null : Number(newValue)
 
@@ -128,7 +222,12 @@ export default function EditableCell({ value, column, rowId, canEdit, onSave, hi
 
   function handleKeyDown(e) {
     if (e.key === 'Enter') { e.preventDefault(); commit() }
-    else if (e.key === 'Escape') setIsEditing(false)
+    else if (e.key === 'Escape') { setIsEditing(false); setSuggestions([]) }
+  }
+
+  function handleSelectSuggestion(suggestion) {
+    setSuggestions([])
+    commit(suggestion.search_key)
   }
 
   /* ------------------------------------------------------------------ */
@@ -179,7 +278,6 @@ export default function EditableCell({ value, column, rowId, canEdit, onSave, hi
         </>
       )
     } else if (type === 'gdrive_link') {
-      // Edit mode for gdrive_link: plain URL text input
       input = (
         <>
           <input
@@ -198,7 +296,7 @@ export default function EditableCell({ value, column, rowId, canEdit, onSave, hi
         </>
       )
     } else {
-      // Default: text textarea
+      // Default text / ref_trigger text (dengan autocomplete)
       input = (
         <>
           <textarea
@@ -207,7 +305,8 @@ export default function EditableCell({ value, column, rowId, canEdit, onSave, hi
             style={{
               position: 'absolute', left: 0, top: 0, width: '100%', minHeight: '40px',
               height: 'auto', zIndex: 10, boxShadow: 'rgba(0,0,0,0.15) 0 4px 16px',
-              borderRadius: '2px', background: '#fff', resize: 'none', overflow: 'hidden',
+              borderRadius: suggestions.length > 0 ? '2px 2px 0 0' : '2px',
+              background: '#fff', resize: 'none', overflow: 'hidden',
               wordWrap: 'break-word', whiteSpace: 'pre-wrap',
             }}
             value={editValue}
@@ -215,13 +314,26 @@ export default function EditableCell({ value, column, rowId, canEdit, onSave, hi
               setEditValue(e.target.value)
               e.target.style.height = '40px'
               e.target.style.height = e.target.scrollHeight + 'px'
+              fetchSuggestions(e.target.value)
             }}
-            onBlur={commit}
+            onBlur={() => {
+              // Delay blur agar onMouseDown suggestion sempat fired dulu,
+              // baru commit() dipanggil — sama seperti number/gdrive_link onBlur={commit}
+              setTimeout(() => { commit(); setSuggestions([]) }, 150)
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit() }
-              else if (e.key === 'Escape') setIsEditing(false)
+              else if (e.key === 'Escape') { setIsEditing(false); setSuggestions([]) }
             }}
           />
+          {/* Autocomplete dropdown (hanya untuk is_ref_trigger) */}
+          {is_ref_trigger && (
+            <AutocompleteDropdown
+              suggestions={suggestions}
+              onSelect={handleSelectSuggestion}
+              onClose={() => setSuggestions([])}
+            />
+          )}
           {showSaved && <SaveIndicator />}
         </>
       )
@@ -237,10 +349,14 @@ export default function EditableCell({ value, column, rowId, canEdit, onSave, hi
   /* ------------------------------------------------------------------ */
   /*  Render display state                                                 */
   /* ------------------------------------------------------------------ */
+
   // gdrive_link: Preview component
   if (type === 'gdrive_link' && displayValue) {
     return (
-      <td style={{ overflow: 'visible', ...(highlight ? { background: '#e8f0fe' } : {}) }}>
+      <td style={{ overflow: 'visible', position: 'relative', ...(highlight ? { background: '#e8f0fe' } : {}) }}>
+        {is_item_code_column && (
+          <ItemCodeModeToggle mode={effectiveMode} canToggle={canEdit} onToggle={m => onToggleMode?.(rowId, m)} />
+        )}
         <GdrivePreview url={displayValue} canEdit={effectiveCanEdit} onEdit={startEdit} />
         {showSaved && <SaveIndicator />}
       </td>
@@ -251,7 +367,7 @@ export default function EditableCell({ value, column, rowId, canEdit, onSave, hi
   if (type === 'select' && displayValue) {
     return (
       <td
-        style={{ cursor: effectiveCanEdit ? 'pointer' : 'default', ...(highlight ? { background: '#e8f0fe' } : {}) }}
+        style={{ cursor: effectiveCanEdit ? 'pointer' : 'default', position: 'relative', ...(highlight ? { background: '#e8f0fe' } : {}) }}
         onClick={effectiveCanEdit ? startEdit : undefined}
       >
         <div className="grid-cell-display" style={{ position: 'relative' }}>
@@ -262,7 +378,45 @@ export default function EditableCell({ value, column, rowId, canEdit, onSave, hi
     )
   }
 
-  // is_readonly: render with visual cue
+  // is_item_code_column: tampilkan toggle + handle auto mode visual
+  if (is_item_code_column) {
+    const isEmpty = !displayValue
+    return (
+      <td
+        style={{
+          cursor: isItemCodeAutoMode ? 'default' : (effectiveCanEdit ? 'pointer' : 'default'),
+          position: 'relative',
+          background: isItemCodeAutoMode
+            ? (isEmpty ? '#fff8f0' : '#f0fdf4')
+            : (highlight ? '#e8f0fe' : undefined),
+        }}
+        onClick={isItemCodeAutoMode ? undefined : (effectiveCanEdit ? startEdit : undefined)}
+        title={isItemCodeAutoMode
+          ? (isEmpty ? 'Mode Auto: belum ada kode dari katalog' : 'Mode Auto: kode dari katalog')
+          : 'Mode Manual: klik untuk edit'}
+      >
+        <ItemCodeModeToggle
+          mode={effectiveMode}
+          canToggle={canEdit}
+          onToggle={m => onToggleMode?.(rowId, m)}
+        />
+        <div style={{
+          padding: '6px 8px 6px 32px', fontSize: '12px',
+          color: isEmpty ? '#b06000' : (isItemCodeAutoMode ? '#188038' : '#1f2328'),
+          fontFamily: 'monospace', fontStyle: isEmpty ? 'italic' : 'normal',
+          fontWeight: isEmpty ? 400 : 600,
+          userSelect: isItemCodeAutoMode ? 'none' : undefined,
+        }}>
+          {isEmpty
+            ? (isItemCodeAutoMode ? '— belum cocok —' : '—')
+            : String(displayValue)}
+        </div>
+        {showSaved && <SaveIndicator />}
+      </td>
+    )
+  }
+
+  // is_readonly: render dengan visual cue
   if (is_readonly) {
     return (
       <td
@@ -282,7 +436,7 @@ export default function EditableCell({ value, column, rowId, canEdit, onSave, hi
     )
   }
 
-  // Default: text / number display
+  // Default: text / number / ref_trigger display
   const isEmpty = displayValue === null
   return (
     <td
@@ -295,6 +449,10 @@ export default function EditableCell({ value, column, rowId, canEdit, onSave, hi
         style={{ position: 'relative' }}
       >
         <span>{displayValue != null ? String(displayValue) : '—'}</span>
+        {/* Hint icon untuk kolom pemicu */}
+        {is_ref_trigger && !isEmpty && (
+          <span style={{ marginLeft: '4px', fontSize: '9px', color: '#1a73e8', opacity: 0.6 }}>⚡</span>
+        )}
         {showSaved && <SaveIndicator />}
       </div>
     </td>

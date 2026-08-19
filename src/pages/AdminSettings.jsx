@@ -18,6 +18,7 @@ import HierarchyManager from '../components/admin/HierarchyManager'
 import ItemCodeRuleManager from '../components/admin/ItemCodeRuleManager'
 import SyncMonitor from '../components/admin/SyncMonitor'
 import CompletionRulesManager from '../components/admin/CompletionRulesManager'
+import UnmatchedReport from '../components/admin/UnmatchedReport'
 
 /* ------------------------------------------------------------------ */
 /*  Tab config                                                           */
@@ -51,7 +52,19 @@ const TABS = [
         <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
       </svg>
     ),
-    desc: 'Template kode material dan catalog referensi.',
+    desc: 'Konfigurasi kolom Item Code dan kelola Reference Catalog per Department.',
+  },
+  {
+    id: 'unmatched',
+    label: 'Belum Ketemu Kode',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+    ),
+    desc: 'Laporan baris Mode Auto yang belum mendapatkan kode item dari katalog.',
   },
   {
     id: 'sync',
@@ -160,6 +173,7 @@ export default function AdminSettings() {
             {activeTab === 'itemcode'          && <ItemCodeRuleManager />}
             {activeTab === 'sync'              && <SyncMonitor />}
             {activeTab === 'exception_rules'   && <CompletionRulesManager />}
+            {activeTab === 'unmatched'         && <UnmatchedReport />}
           </div>
         </main>
       </div>
