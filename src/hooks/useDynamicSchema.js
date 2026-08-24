@@ -97,11 +97,16 @@ export function useDynamicSchema(departmentId) {
       key,
       label: colDef.label.trim(),
       type: colDef.type || 'text',
+      // applies_to: 'records' untuk struktur records, 'reference_catalog' untuk ref catalog
+      // Default 'records' — kolom dari Import Wizard selalu untuk records (SRS §10.1)
+      applies_to: colDef.applies_to ?? 'records',
       order: maxOrder + 1,
       is_required: colDef.is_required ?? false,
       is_visible: colDef.is_visible ?? true,
       is_editable_by_pic: colDef.is_editable_by_pic ?? true,
       is_ref_trigger: colDef.is_ref_trigger ?? false,
+      is_item_code_column: colDef.is_item_code_column ?? false,
+      is_search_key: colDef.is_search_key ?? false,
       is_auto: colDef.is_auto ?? false,
       is_readonly: colDef.is_readonly ?? false,
       select_options: colDef.select_options || [],

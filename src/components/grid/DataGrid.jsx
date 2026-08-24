@@ -353,8 +353,9 @@ export default function DataGrid({ locationName, canEdit }) {
   const { addToast } = useToast()
 
   // Dynamic schema and data hooks
-  const { columns } = useDynamicSchema(activeDepartmentId)
+  const { columns, addColumn } = useDynamicSchema(activeDepartmentId)
   const { rows, isLoading, addRow, bulkAddRows, updateCell, updateFlag, updateItemCodeMode, deleteRow, bulkDeleteRows, bulkFillColumn } = useGridData(activeLocationId, activeDepartmentId)
+  const { isAdmin } = useAuth()
   // Aturan pengecualian kelengkapan — diambil live dari Dexie, reaktif saat Admin mengubah rules
   const exceptionRules = useLiveExceptionRules(activeDepartmentId)
 
@@ -931,6 +932,8 @@ export default function DataGrid({ locationName, canEdit }) {
         <ImportModal
           columns={columns}
           bulkInsertRows={bulkInsertRows}
+          addColumn={addColumn}
+          isAdmin={isAdmin}
           locationId={activeLocationId}
           departmentId={activeDepartmentId}
           locationName={locationName}

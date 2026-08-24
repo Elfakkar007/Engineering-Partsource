@@ -10,7 +10,9 @@
  * Import:
  *   parseExcelFile(file) → { headers, data, raw }
  *   mapHeadersToColumns(headers, columns) → mapping[]
+ *   extractUniqueValues(data, fileHeader) → string[]
  *   validateRows(data, mapping, columns) → { valid, errors }
+ *   rowToComponents(row, mapping) → components object
  */
 
 import * as XLSX from 'xlsx'
@@ -164,15 +166,28 @@ export async function parseExcelFile(file) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Sentinel value untuk header yang tidak cocok dengan kolom manapun
+ * dan akan dibuat sebagai kolom baru. Nilai ini HARUS di-resolve ke key
+ * asli sebelum rowToComponents dipanggil.
+ */
+export const NEW_COLUMN_SENTINEL = '__NEW__'
+
+/**
  * Petakan header dari file Excel ke key kolom di columns_config.
  * Pencocokan berdasarkan label (case-insensitive, trim).
  *
+ * Untuk header yang tidak cocok dengan kolom manapun (unmatched),
+ * entry dikembalikan dengan colKey = NEW_COLUMN_SENTINEL dan isNew = true
+ * — user kemudian memilih: buat kolom baru, petakan ke existing, atau abaikan.
+ *
  * @param {string[]} fileHeaders   - header dari file Excel
- * @param {Object[]} columns       - columns dari useDynamicSchema
+ * @param {Object[]} columns       - columns dari useDynamicSchema (applies_to='records')
  * @returns {Object[]} mapping array:
- *   { fileHeader, colKey, label, type, matched, isNew }
+ *   { fileHeader, colKey, label, type, matched, isNew, select_options }
  *   - matched=true: header file cocok dengan kolom existing
  *   - isNew=true: header file tidak ditemukan di columns_config
+ *   - colKey=NEW_COLUMN_SENTINEL: perlu dibuat sebagai kolom baru
+ *   - colKey=null: diabaikan user
  */
 export function mapHeadersToColumns(fileHeaders, columns) {
   return fileHeaders.map(fileHeader => {
@@ -190,19 +205,46 @@ export function mapHeadersToColumns(fileHeaders, columns) {
         matched: true,
         isNew: false,
         is_required: match.is_required,
+        select_options: match.select_options || [],
       }
     }
 
+    // Header tidak cocok → default ke "buat kolom baru" (sentinel)
     return {
       fileHeader,
-      colKey: null, // belum dipetakan
+      colKey: NEW_COLUMN_SENTINEL, // akan di-resolve saat commit
       label: fileHeader,
-      type: 'text', // default untuk kolom baru
+      type: 'text', // default, user bisa ganti di Step 2
       matched: false,
       isNew: true,
       is_required: false,
+      select_options: [], // auto-extract jika type='select' dipilih user
     }
   })
+}
+
+/* ------------------------------------------------------------------ */
+/*  IMPORT — Extract Unique Values (untuk select_options)              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Ekstrak nilai unik dari satu kolom di data import.
+ * Digunakan saat user memilih type='select' untuk kolom baru —
+ * nilainya otomatis jadi select_options awal (SRS §10.1 §2b).
+ *
+ * @param {Object[]} data        - hasil parseExcelFile().data
+ * @param {string}   fileHeader  - nama header kolom yang ingin diekstrak
+ * @returns {string[]} array nilai unik, terurut A-Z, kosong dibuang
+ */
+export function extractUniqueValues(data, fileHeader) {
+  const seen = new Set()
+  data.forEach(row => {
+    const v = row[fileHeader]
+    if (v !== '' && v !== null && v !== undefined) {
+      seen.add(String(v).trim())
+    }
+  })
+  return [...seen].filter(Boolean).sort((a, b) => a.localeCompare(b, 'id'))
 }
 
 /* ------------------------------------------------------------------ */
@@ -213,7 +255,8 @@ export function mapHeadersToColumns(fileHeaders, columns) {
  * Validasi setiap baris data import terhadap kolom yang required.
  *
  * @param {Object[]} data      - hasil parseExcelFile().data
- * @param {Object[]} mapping   - hasil mapHeadersToColumns()
+ * @param {Object[]} mapping   - hasil mapHeadersToColumns() — colKey bisa berupa key asli,
+ *                               NEW_COLUMN_SENTINEL (akan dibuat), atau null (diabaikan)
  * @param {Object[]} columns   - semua kolom dari useDynamicSchema
  * @returns {{ valid: boolean, rows: Object[], errors: Object[] }}
  *   rows: data dengan tambahan field _rowIndex & _errors
@@ -226,7 +269,7 @@ export function validateImportRows(data, mapping, columns) {
   const annotatedRows = data.map((row, idx) => {
     const rowErrors = []
 
-    // Cek setiap kolom required yang ada di mapping
+    // Cek setiap kolom required yang ada di mapping (dan bukan diabaikan/baru)
     requiredCols.forEach(reqCol => {
       const mapEntry = mapping.find(m => m.colKey === reqCol.key)
       if (!mapEntry) return // kolom required tapi tidak ada di file → abaikan
@@ -273,14 +316,19 @@ export function validateImportRows(data, mapping, columns) {
  * Konversi satu baris import (keyed by fileHeader) ke format components
  * (keyed by colKey) yang siap disimpan ke Dexie.
  *
+ * PENTING: mapping yang diterima di sini harus sudah RESOLVED —
+ * artinya colKey NEW_COLUMN_SENTINEL sudah diganti dengan key asli
+ * yang baru dibuat, atau null jika diabaikan. Lihat handleCommit di ImportModal.
+ *
  * @param {Object}   row      - baris data dari parseExcelFile (key = fileHeader)
- * @param {Object[]} mapping  - hasil mapHeadersToColumns
+ * @param {Object[]} mapping  - mapping yang sudah di-resolve (colKey = key asli atau null)
  * @returns {Object}  components object: { col_key: value }
  */
 export function rowToComponents(row, mapping) {
   const components = {}
   mapping.forEach(m => {
-    if (!m.colKey || m.isNew) return  // skip unmapped / new columns
+    // Skip: diabaikan (null) atau sentinel yang belum ter-resolve
+    if (!m.colKey || m.colKey === NEW_COLUMN_SENTINEL) return
     const val = row[m.fileHeader]
     if (val === '' || val === null || val === undefined) {
       components[m.colKey] = null

@@ -205,6 +205,8 @@ dicocokkan on-the-fly saat kolom pemicu (`is_ref_trigger`) di suatu baris `recor
 | is_ref_trigger | boolean | relevan hanya untuk `applies_to="records"` — jika `true`, kolom ini adalah **kolom pemicu** (satu per Department) yang mengaktifkan autocomplete & pencocokan Item Code ke `reference_catalog.search_key` (lihat §7) |
 | is_search_key | boolean | relevan hanya untuk `applies_to="reference_catalog"` — jika `true`, kolom ini adalah **kolom kunci pencarian** (satu per Department); nilainya disalin ke `reference_catalog.search_key` |
 | is_item_code_column | boolean | relevan hanya untuk `applies_to="records"` — jika `true`, kolom ini adalah target auto-fill/manual Item Code, dipasangkan dengan `records.item_code_mode` (lihat §7) |
+| is_auto | boolean | relevan untuk `applies_to="records"` — jika `true`, nilai kolom ini di-generate/diisi sistem (bukan diketik manual user). Dipakai untuk: mengecualikan kolom ini dari pilihan mapping manual di Import Wizard (§10.1), dan menampilkan badge "auto" di Schema Manager |
+| is_readonly | boolean | relevan untuk `applies_to="records"` — jika `true`, sel kolom ini terkunci dari mode klik-untuk-edit di grid (independen dari role/`is_editable_by_pic`), dikecualikan dari Bulk Fill & Find-Replace, ditandai ikon 🔒 di header grid |
 | order | number | urutan kolom di grid |
 
 **`records`** — baris data grid (generik, lintas Department)

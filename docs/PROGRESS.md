@@ -14,8 +14,10 @@
 - [x] **Tahap 8d: UI Grid — Toggle Auto/Manual, Autocomplete, Laporan Belum Ketemu Kode**
   - ✅ **Migrasi Item Code Engine SELESAI** (Tahap 8a–8d)
 - [x] **Tahap 8e: QA & Fix Sync Path Item Code** — Verifikasi 3 jalur kritis (tidak ada bug ditemukan)
+- [x] **Tahap 9: Dynamic Auto-Create Columns for Import Wizard**
 
 ---
+
 
 ## Log Catatan Tahap 1
 - **Status**: Selesai & Build Validated.
@@ -248,3 +250,46 @@ VITE_POCKETBASE_URL=http://[IP_SERVER_LOKAL]:8090
     }}
     ```
   - `commit()` sudah mengandung `setIsEditing(false)` di baris 205, jadi tidak ada duplikasi. Delay 150ms dipertahankan agar `onMouseDown` suggestion sempat fired sebelum blur commit. Build validated: 0 errors, built in 665ms.
+
+## Log Catatan Tahap 9: Dynamic Auto-Create Columns for Import Wizard
+- **Status**: Selesai & Build Validated (0 errors, built in 6.07s, 635 modules).
+- **Konteks**: SRS v2.0 §10.1 — Import Wizard sudah ada tapi header yang tidak cocok dengan `columns_config` hanya bisa "diabaikan". Tahap 9 mengimplementasikan auto-detect & create kolom baru langsung dari wizard tanpa keluar-masuk Schema Manager.
+
+### File yang Diubah
+
+**`src/lib/excelEngine.js`**
+- Tambah konstanta ekspor `NEW_COLUMN_SENTINEL = '__NEW__'` — dipakai sebagai placeholder unik per header yang belum ter-resolve. Tidak pernah dipakai sebagai key asli. Ini mengatasi **Perhatian Teknis 1** (collision preview): setiap header baru pakai sentinelnya sendiri, tidak perlu shared placeholder.
+- `mapHeadersToColumns()`: header yang tidak cocok kini dikembalikan dengan `colKey: NEW_COLUMN_SENTINEL` (bukan `null`), jadi state "baru" dapat dibedakan dari state "diabaikan" (`null`).
+- Tambah fungsi `extractUniqueValues(data, fileHeader)` — mengekstrak nilai unik dari seluruh data kolom tersebut di file yang diupload, lalu mengembalikan array string terurut A-Z. Dipanggil otomatis saat user memilih `type='select'` untuk kolom baru (SRS §10.1 §2b).
+- `rowToComponents()`: kondisi skip diubah dari `m.isNew` (mutable) ke `m.colKey === NEW_COLUMN_SENTINEL` — setelah commit sentinel sudah diganti key asli, sehingga data kolom baru ikut tersimpan dengan benar.
+
+**`src/hooks/useDynamicSchema.js`** — fungsi `addColumn()`
+- Tambah field `applies_to` (default `'records'`), `is_item_code_column` (default `false`), `is_search_key` (default `false`) ke object yang disimpan ke Dexie. Ini memastikan kolom baru buatan Import Wizard memenuhi skema lengkap SRS §5.2 — tidak ada field `undefined` yang bisa menyebabkan komponen grid/engine error saat membaca field ini.
+
+**`src/components/grid/DataGrid.jsx`**
+- Destructure `addColumn` dari `useDynamicSchema(activeDepartmentId)`.
+- Destructure `isAdmin` dari `useAuth()`.
+- Kedua prop ini diteruskan ke `<ImportModal>`.
+
+**`src/components/grid/ImportModal.jsx`** — rewrite total
+- **Prop baru**: `addColumn`, `isAdmin`, `departmentId`.
+- **`recordsColumns`**: filter `columns` hanya yang `applies_to === 'records'` (atau tidak ada `applies_to`) agar dropdown pemetaan tidak mencampur kolom ref catalog.
+- **RBAC — Perhatian Utama**: di `handleFileChange()`, jika `isAdmin === false`, semua entry dengan `colKey === NEW_COLUMN_SENTINEL` diubah ke `null` sebelum masuk ke state `mapping`. Dengan demikian: (a) UI tidak pernah menampilkan opsi "✦ Buat kolom baru" untuk non-admin; (b) bahkan jika opsi ini entah bagaimana muncul, `handleCommit()` punya **safety gate kedua**: `if (!isAdmin) return { ...m, colKey: null }` untuk setiap entry NEW_COLUMN_SENTINEL — tidak akan pernah memanggil `addColumn()` jika bukan admin. Ini mencegah silent data inconsistency yang disebutkan di requirement RBAC.
+- **`updateNewColType(fileHeader, newType)`**: saat user pilih tipe `'select'`, langsung memanggil `extractUniqueValues(parseResult.data, fileHeader)` dan menyimpannya ke `mapping[].select_options`. User bisa hapus/tambah opsi lewat `SelectOptionsEditor`.
+- **`SelectOptionsEditor`** (sub-komponen baru): tampil chip per opsi dengan tombol hapus, input tambah manual, mendukung Enter untuk submit.
+- **Collision key — `handleCommit()`** (**Perhatian Teknis 2**): sebelum memanggil `addColumn()`, fungsi `generateSafeKey(label)` mengambil snapshot semua key existing dari `db.columns_config.where('department_id').equals(departmentId).toArray()`, lalu melacak key yang sudah di-generate dalam batch yang sama via `newKeysInBatch` (Set lokal). Bila ada bentrok, suffix `_2`, `_3`, dst. ditambahkan sampai key unik. Ini menangani kasus "2 header baru nama mirip dalam satu file" sekaligus "header baru yang namanya sama dengan kolom existing".
+- **Urutan commit** (**SRS §10.1 Tahap 4**): `addColumn()` di-await untuk SEMUA kolom baru (via `Promise.all` + sequential async map) → baru `bulkInsertRows()`. Data records tidak pernah ditulis sebelum kolom tujuannya ada.
+- **`resolvedMapping`**: hasil dari Promise.all di atas — semua `NEW_COLUMN_SENTINEL` sudah diganti key asli. Ini yang dipakai ke `rowToComponents()` — data kolom baru ikut tersimpan dengan benar.
+- **`applies_to: 'records'`** eksplisit di setiap call `addColumn()` — **Perhatian Teknis 3** terpenuhi.
+- **Semua boolean flag** (`is_required`, `is_visible`, `is_editable_by_pic`, `is_ref_trigger`, `is_item_code_column`, `is_search_key`, `is_auto`, `is_readonly`) diisi eksplisit dengan default yang aman — tidak ada `undefined` (**Perhatian Teknis 4**).
+- **UI Step 3 (Preview)**: kolom dengan `colKey === NEW_COLUMN_SENTINEL` tetap ditampilkan di header preview (diberi label biru "✦ fileHeader") dan datanya ditampilkan per baris — validasi visual sebelum commit.
+- **Tombol commit**: labelnya berubah jadi `"Import N Baris + Buat M Kolom"` jika ada kolom baru, jelas bagi user.
+- **Validasi Step 2**: tombol "Validasi Data →" di-disable jika ada kolom baru bertipe `select` tanpa opsi pilihan sama sekali (warning ditampilkan).
+
+### Verifikasi
+- **Build**: 0 errors, 635 modules, built in 6.07s ✅
+- **Test manual yang direkomendasikan**:
+  1. Import file dengan ≥2 header baru sekaligus → pastikan preview Step 3 menampilkan keduanya secara terpisah, tidak saling tumpah.
+  2. Login sebagai non-admin (staff/pic) → opsi "✦ Buat kolom baru" tidak muncul di Step 2; info warning kuning muncul sebagai gantinya.
+  3. Pilih tipe "Pilihan (Select)" untuk kolom baru → `select_options` langsung ter-extract dari data file.
+  4. Import 2 file berturut-turut dengan header mirip ("Qty (pcs)" lalu "Qty pcs") → key yang dihasilkan berbeda (suffix `_2`), tidak ada bentrok di `columns_config`.
