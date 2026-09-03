@@ -17,8 +17,7 @@ const writeBatch = () => ({
 })
 const db = {}
 import { useToast } from '../contexts/ToastContext'
-import { useNavigate } from 'react-router-dom'
-import ConfirmDeleteModal from '../components/ConfirmDeleteModal'
+import { useDialog } from '../contexts/DialogContext'
 import { useAuth } from '../contexts/AuthContext'
 import { logActivity } from '../lib/activityLog'
 
@@ -38,8 +37,8 @@ export default function RecycleBin() {
   const [selectedIds, setSelectedIds] = useState([])
   
   const { addToast } = useToast()
-  const navigate = useNavigate()
   const { currentUser } = useAuth()
+  const { confirm } = useDialog()
 
   // Computed filter options
   const uniqueLines = Array.from(new Set(rows.map(r => r.line).filter(Boolean))).sort()
@@ -159,16 +158,23 @@ export default function RecycleBin() {
     setSelectedIds([])
   }
 
-  const handleConfirmPermanentDelete = () => {
-    if (!deleteTargetIds || deleteTargetIds.length === 0) return
+  const handleConfirmPermanentDelete = async (ids) => {
+    if (!ids || ids.length === 0) return
+    const confirmed = await confirm({
+      title: ids.length > 1 ? `Hapus ${ids.length} Baris Selamanya?` : 'Hapus Selamanya?',
+      message: `Tindakan ini akan menghapus ${ids.length} baris dari database secara permanen dan tidak dapat di-undo.`,
+      danger: true,
+      confirmText: ids.length > 1 ? `Hapus ${ids.length} Baris` : 'Hapus Selamanya'
+    })
+    if (!confirmed) return
     logActivity(
-      deleteTargetIds.length > 1 ? 'bulk_hapus_permanen' : 'hapus_permanen',
+      ids.length > 1 ? 'bulk_hapus_permanen' : 'hapus_permanen',
       currentUser?.uid,
-      { count: deleteTargetIds.length }
+      { count: ids.length }
     )
     const batch = writeBatch(db)
-    const count = deleteTargetIds.length
-    deleteTargetIds.forEach(id => {
+    const count = ids.length
+    ids.forEach(id => {
       batch.delete(doc(db, 'components', id))
     })
     batch.commit().catch((err) => {
@@ -180,8 +186,7 @@ export default function RecycleBin() {
       }
     })
     addToast(`Data berhasil dihapus selamanya (${count} baris)`, 'success')
-    setSelectedIds(prev => prev.filter(id => !deleteTargetIds.includes(id)))
-    setDeleteTargetIds([])
+    setSelectedIds(prev => prev.filter(id => !ids.includes(id)))
   }
 
   const formatDate = (timestamp) => {
@@ -198,31 +203,8 @@ export default function RecycleBin() {
   }
 
   return (
-    <div style={{ minHeight: '100svh', background: '#f8f9fa', paddingBottom: '48px' }}>
-      <header style={{
-        background: '#ffffff',
-        borderBottom: '1px solid #dadce0',
-        padding: '0 16px',
-        height: '48px',
-        display: 'flex',
-        alignItems: 'center',
-        position: 'sticky',
-        top: 0,
-        zIndex: 20,
-      }}>
-        <button 
-          onClick={() => navigate('/')} 
-          className="btn-secondary" 
-          style={{ padding: '6px 12px', marginRight: '16px', fontSize: '13px' }}
-        >
-          &larr; Kembali ke Dashboard
-        </button>
-        <h1 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: '#1f2328' }}>
-          Recycle Bin
-        </h1>
-      </header>
-
-      <main style={{ maxWidth: '1000px', margin: '32px auto 0', padding: '0 16px' }}>
+    <div style={{ paddingBottom: '48px' }}>
+      <div style={{ padding: '24px 28px', maxWidth: '1000px', margin: '0 auto' }}>
         <div style={{ marginBottom: '24px' }}>
           <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: '#1f2328', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -309,7 +291,7 @@ export default function RecycleBin() {
               <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '12px', background: '#fff' }} onClick={handleBulkRestore}>
                 Pulihkan Terpilih
               </button>
-              <button className="btn-danger" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => setDeleteTargetIds(selectedIds)}>
+              <button className="btn-danger" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => handleConfirmPermanentDelete(selectedIds)}>
                 Hapus Selamanya Terpilih
               </button>
             </div>
@@ -373,7 +355,7 @@ export default function RecycleBin() {
                         <button 
                           className="btn-danger"
                           style={{ padding: '4px 10px', fontSize: '12px' }}
-                          onClick={() => setDeleteTargetIds([row.id])}
+                          onClick={() => handleConfirmPermanentDelete([row.id])}
                         >
                           Hapus Selamanya
                         </button>
@@ -386,18 +368,8 @@ export default function RecycleBin() {
           )}
         </div>
 
-        {/* Delete Confirmation Modal */}
-        {deleteTargetIds.length > 0 && (
-          <ConfirmDeleteModal
-            title="Konfirmasi Hapus Permanen"
-            itemLabel={`${deleteTargetIds.length} baris secara permanen`}
-            warningText="Tindakan ini akan menghapus dokumen dari database secara permanen dan tidak dapat di-undo."
-            confirmText="Hapus Selamanya"
-            onConfirm={handleConfirmPermanentDelete}
-            onCancel={() => setDeleteTargetIds([])}
-          />
-        )}
-      </main>
+
+      </div>
     </div>
   )
 }

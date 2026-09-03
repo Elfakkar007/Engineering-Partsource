@@ -53,16 +53,39 @@ export function NavigationProvider({ children }) {
   )
 
   const locations = useLiveQuery(
-    () => {
-      if (!activeLineId || !activeDepartmentId) return []
-      return db.locations_cache
+    async () => {
+      if (!activeDepartmentId) return []
+
+      // Coba compound index dulu (paling efisien)
+      if (activeLineId) {
+        try {
+          const exact = await db.locations_cache
+            .where('[line_id+department_id]')
+            .equals([activeLineId, activeDepartmentId])
+            .toArray()
+          if (exact.length > 0) return exact
+        } catch {
+          // compound index mungkin belum ada di browser lama
+        }
+      }
+
+      // Fallback: filter by department saja, lalu saring per line di JS
+      // (covers kasus compound index gagal / line baru dibuat via import)
+      const byDept = await db.locations_cache
         .where('department_id')
         .equals(activeDepartmentId)
         .toArray()
+
+      if (activeLineId) {
+        const filtered = byDept.filter(l => l.line_id === activeLineId)
+        return filtered.length > 0 ? filtered : byDept
+      }
+      return byDept
     },
     [activeLineId, activeDepartmentId],
     []
   )
+
 
   /* ---------------------------------------------------------------- */
   /*  Auto-fallback: Department                                         */

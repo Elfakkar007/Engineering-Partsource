@@ -1,8 +1,8 @@
 import { createContext, useContext, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { undoImportBatch } from '../lib/importUndo'
-import ConfirmDeleteModal from '../components/ConfirmDeleteModal'
 import { useToast } from './ToastContext'
+import { useDialog } from './DialogContext'
 import { logActivity } from '../lib/activityLog'
 import { useAuth } from './AuthContext'
 
@@ -17,14 +17,22 @@ export function ImportUndoProvider({ children }) {
   const [isUndoing, setIsUndoing] = useState(false)
   const [undoProgress, setUndoProgress] = useState('')
   const { addToast } = useToast()
+  const { confirm } = useDialog()
   const { currentUser } = useAuth()
 
-  const requestUndo = (importBatchId, rows, locs) => {
+  const requestUndo = async (importBatchId, rows, locs) => {
+    const confirmed = await confirm({
+      title: 'Batalkan Import Ini?',
+      message: `Import ini akan dibatalkan — ${rows} baris data dan ${locs} lokasi yang baru saja dibuat akan dihapus permanen. Lanjutkan?`,
+      danger: true,
+      confirmText: 'Ya, Batalkan Import'
+    })
+    if (!confirmed) return
     setPendingUndo({ importBatchId, rows, locs })
+    handleConfirmUndo(importBatchId)
   }
 
-  const handleConfirmUndo = async () => {
-    const batchId = pendingUndo.importBatchId
+  const handleConfirmUndo = async (batchId) => {
     setIsUndoing(true)
     setPendingUndo(null)
     setUndoProgress('Memulai pembatalan import...')
@@ -50,23 +58,13 @@ export function ImportUndoProvider({ children }) {
   return (
     <ImportUndoContext.Provider value={{ requestUndo }}>
       {children}
-      {pendingUndo && (
-        <ConfirmDeleteModal
-          title="Konfirmasi Batalkan Import"
-          itemLabel={`Import Batch`}
-          warningText={`Anda akan membatalkan import ini — ${pendingUndo.rows} baris data dan ${pendingUndo.locs} lokasi yang baru saja dibuat akan dihapus permanen. Lanjutkan?`}
-          confirmText="Ya, Batalkan Import"
-          onConfirm={handleConfirmUndo}
-          onCancel={() => setPendingUndo(null)}
-        />
-      )}
       {isUndoing && undoProgress && createPortal(
         <div className="modal-backdrop" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', textAlign: 'center' }}>
+          <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)', textAlign: 'center' }}>
             <div style={{ width: '40px', height: '40px', border: '3px solid #f3f3f3', borderTop: '3px solid #0969da', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px' }}></div>
             <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
-            <h3 style={{ margin: '0 0 8px', color: '#1f2328' }}>Proses Undo Sedang Berjalan</h3>
-            <p style={{ margin: 0, color: '#5f6368', fontSize: '14px' }}>{undoProgress}</p>
+            <h3 style={{ margin: '0 0 8px', color: '#1f2328', fontSize: '15px', fontWeight: 600 }}>Proses Undo Sedang Berjalan</h3>
+            <p style={{ margin: 0, color: '#4b5563', fontSize: '14px' }}>{undoProgress}</p>
           </div>
         </div>,
         document.body

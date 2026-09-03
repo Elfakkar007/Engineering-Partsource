@@ -10,6 +10,7 @@
 
 import { useNavigation } from '../../contexts/NavigationContext'
 import { useAuth } from '../../contexts/AuthContext'
+import { useDialog } from '../../contexts/DialogContext'
 
 /* ------------------------------------------------------------------ */
 /*  Styles                                                              */
@@ -72,6 +73,7 @@ const S = {
 /* ------------------------------------------------------------------ */
 export default function LocationTabs() {
   const { locations, activeLocationId, activeDepartmentId, setActiveLocation } = useNavigation()
+  const { alert } = useDialog()
   const { userRole } = useAuth()
   const isAdmin = userRole === 'admin'
 
@@ -118,7 +120,7 @@ export default function LocationTabs() {
           title="Tambah Location baru"
           onClick={() => {
             // TODO Phase 5: buka form tambah location
-            window.alert('Fitur tambah Location belum tersedia di versi ini.')
+            alert({ title: 'Info', message: 'Fitur tambah Location belum tersedia di versi ini.' })
           }}
         >
           <span style={{ fontSize: '13px', lineHeight: 1 }}>+</span>

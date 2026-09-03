@@ -6,7 +6,6 @@
  */
 
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../lib/db'
 
@@ -73,7 +72,6 @@ function ActionBadge({ action }) {
 }
 
 export default function ActivityLog() {
-  const navigate = useNavigate()
   const [filterAction, setFilterAction] = useState('')
   const [filterEntityType, setFilterEntityType] = useState('')
   const [limit, setLimit] = useState(100)
@@ -108,22 +106,13 @@ export default function ActivityLog() {
   }
 
   return (
-    <div style={{ minHeight: '100svh', background: '#f8f9fa' }}>
-      {/* Header */}
-      <header style={{
-        background: '#fff', borderBottom: '1px solid #dadce0',
-        padding: '0 20px', height: '52px',
-        display: 'flex', alignItems: 'center', gap: '16px',
-        position: 'sticky', top: 0, zIndex: 20,
-      }}>
-        <button className="btn-secondary" style={{ padding: '6px 12px', fontSize: '13px' }}
-          onClick={() => navigate('/')}>← Kembali</button>
-        <div>
-          <h1 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: '#1f2328' }}>Activity Log</h1>
-        </div>
-      </header>
+    <div style={{ padding: '24px 28px', maxWidth: '1100px', margin: '0 auto' }}>
+      <div style={{ marginBottom: '20px' }}>
+        <h1 style={{ margin: '0 0 4px', fontSize: '20px', fontWeight: 700, color: '#1f2328' }}>Activity Log</h1>
+        <p style={{ margin: 0, fontSize: '13px', color: '#5f6368' }}>Rekam jejak semua aktivitas pengguna dalam sistem.</p>
+      </div>
 
-      <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '24px 16px' }}>
+      <div>
 
         {/* Filters */}
         <div style={{

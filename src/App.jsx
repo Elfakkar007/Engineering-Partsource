@@ -14,9 +14,10 @@ import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { ToastProvider } from './contexts/ToastContext'
 import { ImportUndoProvider } from './contexts/ImportUndoContext'
 import { NavigationProvider } from './contexts/NavigationContext'
+import { DialogProvider } from './contexts/DialogContext'
 import { initSyncWorker } from './lib/syncWorker'
-import { seedAllDepartments } from './data/initialSeeds'
 import UpdatePrompt from './components/common/UpdatePrompt'
+import AdminShell from './components/layout/AdminShell'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import LinePage from './pages/LinePage'
@@ -92,20 +93,6 @@ function AppShell({ children }) {
   useEffect(() => {
     // 1. Inisialisasi Background Sync Worker
     const cleanupSync = initSyncWorker()
-
-    // 2. Seed data Department awal — idempotent, tidak memblokir render
-    const runSeed = async () => {
-      try {
-        await seedAllDepartments({
-          mekanik: 'dept_mekanik',
-          elektrik: 'dept_elektrik',
-        })
-      } catch (err) {
-        console.warn('[App] seedAllDepartments warning:', err)
-      }
-    }
-    runSeed()
-
     return cleanupSync
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -123,124 +110,132 @@ function AppShell({ children }) {
 /* ------------------------------------------------------------------ */
 function App() {
   return (
-    <BrowserRouter>
-      <ToastProvider>
-        <AuthProvider>
+    <AuthProvider>
+      <DialogProvider>
+        <ToastProvider>
           <ImportUndoProvider>
-            <AppShell>
-              <AuthLoadingScreen />
-              <Routes>
-                {/* Public */}
-                <Route
-                  path="/login"
-                  element={
-                    <PublicRoute>
-                      <Login />
-                    </PublicRoute>
-                  }
-                />
+            <BrowserRouter>
+              <NavigationProvider>
+                <AppShell>
+                  <AuthLoadingScreen />
+                  <Routes>
+                    {/* Public */}
+                    <Route
+                      path="/login"
+                      element={
+                        <PublicRoute>
+                          <Login />
+                        </PublicRoute>
+                      }
+                    />
 
-                {/* Dashboard — Tier 1 (pilih Line) */}
-                <Route
-                  path="/"
-                  element={
-                    <PrivateRoute>
-                      <Dashboard />
-                    </PrivateRoute>
-                  }
-                />
+                    {/* Dashboard — Tier 1 (pilih Line) */}
+                    <Route
+                      path="/"
+                      element={
+                        <PrivateRoute>
+                          <Dashboard />
+                        </PrivateRoute>
+                      }
+                    />
 
-                {/* LinePage — Tier 2+3 — NavigationProvider di sini karena pakai useParams */}
-                <Route
-                  path="/line/:lineId"
-                  element={
-                    <PrivateRoute>
-                      <NavigationProvider>
-                        <LinePage />
-                      </NavigationProvider>
-                    </PrivateRoute>
-                  }
-                />
-                <Route
-                  path="/line/:lineId/:departmentId"
-                  element={
-                    <PrivateRoute>
-                      <NavigationProvider>
-                        <LinePage />
-                      </NavigationProvider>
-                    </PrivateRoute>
-                  }
-                />
-                <Route
-                  path="/line/:lineId/:departmentId/:locationId"
-                  element={
-                    <PrivateRoute>
-                      <NavigationProvider>
-                        <LinePage />
-                      </NavigationProvider>
-                    </PrivateRoute>
-                  }
-                />
+                    {/* LinePage — Tier 2+3 — NavigationProvider di sini karena pakai useParams */}
+                    <Route
+                      path="/line/:lineId"
+                      element={
+                        <PrivateRoute>
+                          <LinePage />
+                        </PrivateRoute>
+                      }
+                    />
+                    <Route
+                      path="/line/:lineId/:departmentId"
+                      element={
+                        <PrivateRoute>
+                          <LinePage />
+                        </PrivateRoute>
+                      }
+                    />
+                    <Route
+                      path="/line/:lineId/:departmentId/:locationId"
+                      element={
+                        <PrivateRoute>
+                          <LinePage />
+                        </PrivateRoute>
+                      }
+                    />
 
-                {/* Admin routes — lazy loaded, wrapped in Suspense */}
-                <Route
-                  path="/admin/settings"
-                  element={
-                    <AdminRoute>
-                      <Suspense fallback={<PageLoader />}>
-                        <AdminSettings />
-                      </Suspense>
-                    </AdminRoute>
-                  }
-                />
-                <Route
-                  path="/admin/recycle-bin"
-                  element={
-                    <AdminRoute>
-                      <Suspense fallback={<PageLoader />}>
-                        <RecycleBin />
-                      </Suspense>
-                    </AdminRoute>
-                  }
-                />
-                <Route
-                  path="/admin/activity-log"
-                  element={
-                    <AdminRoute>
-                      <Suspense fallback={<PageLoader />}>
-                        <ActivityLog />
-                      </Suspense>
-                    </AdminRoute>
-                  }
-                />
-                <Route
-                  path="/admin/import"
-                  element={
-                    <AdminRoute>
-                      <Suspense fallback={<PageLoader />}>
-                        <ImportExcel />
-                      </Suspense>
-                    </AdminRoute>
-                  }
-                />
-                <Route
-                  path="/admin/export"
-                  element={
-                    <AdminRoute>
-                      <Suspense fallback={<PageLoader />}>
-                        <ExportExcel />
-                      </Suspense>
-                    </AdminRoute>
-                  }
-                />
+                    {/* Admin routes — lazy loaded, wrapped in Suspense + AdminShell */}
+                    <Route
+                      path="/admin/settings"
+                      element={
+                        <AdminRoute>
+                          <AdminShell>
+                            <Suspense fallback={<PageLoader />}>
+                              <AdminSettings />
+                            </Suspense>
+                          </AdminShell>
+                        </AdminRoute>
+                      }
+                    />
+                    <Route
+                      path="/admin/recycle-bin"
+                      element={
+                        <AdminRoute>
+                          <AdminShell>
+                            <Suspense fallback={<PageLoader />}>
+                              <RecycleBin />
+                            </Suspense>
+                          </AdminShell>
+                        </AdminRoute>
+                      }
+                    />
+                    <Route
+                      path="/admin/activity-log"
+                      element={
+                        <AdminRoute>
+                          <AdminShell>
+                            <Suspense fallback={<PageLoader />}>
+                              <ActivityLog />
+                            </Suspense>
+                          </AdminShell>
+                        </AdminRoute>
+                      }
+                    />
+                    <Route
+                      path="/admin/import"
+                      element={
+                        <AdminRoute>
+                          <AdminShell>
+                            <Suspense fallback={<PageLoader />}>
+                              <ImportExcel />
+                            </Suspense>
+                          </AdminShell>
+                        </AdminRoute>
+                      }
+                    />
+                    <Route
+                      path="/admin/export"
+                      element={
+                        <AdminRoute>
+                          <AdminShell>
+                            <Suspense fallback={<PageLoader />}>
+                              <ExportExcel />
+                            </Suspense>
+                          </AdminShell>
+                        </AdminRoute>
+                      }
+                    />
 
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </AppShell>
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  </Routes>
+                </AppShell>
+              </NavigationProvider>
+            </BrowserRouter>
           </ImportUndoProvider>
-        </AuthProvider>
-      </ToastProvider>
-    </BrowserRouter>
+        </ToastProvider>
+      </DialogProvider>
+    </AuthProvider>
   )
 }
 

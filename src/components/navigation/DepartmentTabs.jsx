@@ -9,6 +9,7 @@
  */
 
 import { useNavigation } from '../../contexts/NavigationContext'
+import { useDialog } from '../../contexts/DialogContext'
 import { useAuth } from '../../contexts/AuthContext'
 
 /* ------------------------------------------------------------------ */
@@ -79,6 +80,7 @@ const S = {
  */
 export default function DepartmentTabs({ completionMap = {} }) {
   const { departments, activeDepartmentId, setActiveDepartment } = useNavigation()
+  const { alert } = useDialog()
   const { userRole } = useAuth()
   const isAdmin = userRole === 'admin'
 
@@ -138,7 +140,7 @@ export default function DepartmentTabs({ completionMap = {} }) {
           title="Tambah Department baru"
           onClick={() => {
             // TODO Phase 5: buka form tambah department
-            window.alert('Schema Manager belum tersedia di versi ini.')
+            alert({ title: 'Info', message: 'Schema Manager belum tersedia di versi ini.' })
           }}
         >
           <span style={{ fontSize: '14px', lineHeight: 1 }}>+</span>

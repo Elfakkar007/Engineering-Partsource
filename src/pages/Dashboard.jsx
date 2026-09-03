@@ -256,28 +256,6 @@ export default function Dashboard() {
   // isLoading: true while the first query hasn't resolved yet
   const isLoading = linesRaw === undefined
 
-  // -- State untuk Speed Dial (FAB) --
-  const [isFabVisible, setIsFabVisible] = useState(true)
-  const [isFabOpen, setIsFabOpen] = useState(false)
-
-  // -- Logika Scroll --
-  useEffect(() => {
-    let lastScrollY = window.scrollY
-    const handleScroll = () => {
-      const currentScrollY = window.scrollY
-      if (currentScrollY > lastScrollY) {
-        setIsFabVisible(false)
-        setIsFabOpen(false)
-      } else {
-        setIsFabVisible(true)
-      }
-      lastScrollY = currentScrollY
-    }
-
-    window.addEventListener('scroll', handleScroll, { passive: true })
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [])
-
   // --- Derived data dari Dexie ---
   const stats = useMemo(() => {
     if (!lines.length && !allRecords.length) {
@@ -313,14 +291,7 @@ export default function Dashboard() {
     })
 
     // Hitung per Line
-    const displayLines = lines.length > 0
-      ? lines
-      : [
-        { id: 'line1', name: 'Line 1' },
-        { id: 'line2', name: 'Line 2' },
-        { id: 'line3', name: 'Line 3' },
-        { id: 'line4', name: 'Line 4' },
-      ]
+    const displayLines = lines || []
 
     const lineData = displayLines.map(line => {
       const lineLocations = locationsByLine[line.id] || []
@@ -441,56 +412,40 @@ export default function Dashboard() {
           {/* Left: logo + title */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '8px',
-              background: '#e6f4ea',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
+              width: '32px', height: '32px', borderRadius: '8px',
+              background: '#e6f4ea', display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#188038" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
               </svg>
             </div>
-            <h1 style={{
-              margin: 0,
-              fontSize: '16px',
-              fontWeight: 600,
-              color: '#1f2328',
-              lineHeight: 1.3,
-            }}>
+            <h1 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: '#1f2328', lineHeight: 1.3 }}>
               Plant Sourcing
             </h1>
           </div>
 
-          {/* Right: user info + logout (Diberi class desktop-nav-actions jika berupa tombol navigasi) */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          {/* Right: user info + admin shortcut + logout */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             {userRole === 'admin' && (
-              <div className="desktop-nav-actions" style={{ display: 'flex', gap: '8px' }}>
-                <button onClick={() => navigate('/admin/import')} className="btn-secondary" style={{ padding: '6px 12px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                  Import
-                </button>
-                <button onClick={() => navigate('/admin/export')} className="btn-secondary" style={{ padding: '6px 12px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                  Export
-                </button>
-                <button onClick={() => navigate('/admin/activity-log')} className="btn-secondary" style={{ padding: '6px 12px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                  Activity Log
-                </button>
-                <button onClick={() => navigate('/admin/recycle-bin')} className="btn-secondary" style={{ padding: '6px 12px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                  Recycle Bin
-                </button>
-                <button onClick={() => navigate('/admin/settings')} className="btn-secondary" style={{ padding: '6px 12px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
-                  Pengaturan Kolom
-                </button>
-              </div>
+              <button
+                onClick={() => navigate('/admin/settings')}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  padding: '6px 12px', borderRadius: '6px', fontSize: '13px',
+                  background: '#e6f4ea', color: '#188038', border: '1px solid #c6e6d0',
+                  cursor: 'pointer', fontWeight: 500, fontFamily: 'Inter, system-ui, sans-serif',
+                  transition: 'all 0.15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = '#d4edda' }}
+                onMouseLeave={e => { e.currentTarget.style.background = '#e6f4ea' }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+                Panel Admin
+              </button>
             )}
-
             {currentUser && (
               <>
                 <div style={{ textAlign: 'right' }}>
@@ -503,7 +458,7 @@ export default function Dashboard() {
                 </div>
                 <button
                   onClick={handleLogout}
-                  className="btn-secondary desktop-nav-actions"
+                  className="btn-secondary"
                   style={{ padding: '6px 12px', fontSize: '13px', color: '#5f6368' }}
                 >
                   Keluar
@@ -511,11 +466,7 @@ export default function Dashboard() {
               </>
             )}
             {!currentUser && (
-              <button
-                onClick={() => navigate('/login')}
-                className="btn-primary"
-                style={{ padding: '6px 16px', fontSize: '13px' }}
-              >
+              <button onClick={() => navigate('/login')} className="btn-primary" style={{ padding: '6px 16px', fontSize: '13px' }}>
                 Login
               </button>
             )}
@@ -625,75 +576,6 @@ export default function Dashboard() {
           </>
         )}
       </main>
-
-      {/* ---- Speed Dial (Mobile) ---- */}
-      {currentUser && (
-        <div className={`mobile-speed-dial-container ${isFabVisible ? 'fab-visible' : 'fab-hidden'}`}>
-          <div className={`speed-dial-menu ${isFabOpen ? 'open' : ''}`}>
-
-            {userRole === 'admin' && (
-              <>
-                <div className="speed-dial-item">
-                  <span className="speed-dial-tooltip">Pengaturan Kolom</span>
-                  <button onClick={() => { setIsFabOpen(false); navigate('/admin/settings') }} className="speed-dial-btn">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
-                  </button>
-                </div>
-                <div className="speed-dial-item">
-                  <span className="speed-dial-tooltip">Recycle Bin</span>
-                  <button onClick={() => { setIsFabOpen(false); navigate('/admin/recycle-bin') }} className="speed-dial-btn">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                  </button>
-                </div>
-                <div className="speed-dial-item">
-                  <span className="speed-dial-tooltip">Activity Log</span>
-                  <button onClick={() => { setIsFabOpen(false); navigate('/admin/activity-log') }} className="speed-dial-btn">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                  </button>
-                </div>
-                <div className="speed-dial-item">
-                  <span className="speed-dial-tooltip">Export</span>
-                  <button onClick={() => { setIsFabOpen(false); navigate('/admin/export') }} className="speed-dial-btn">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                  </button>
-                </div>
-                <div className="speed-dial-item">
-                  <span className="speed-dial-tooltip">Import</span>
-                  <button onClick={() => { setIsFabOpen(false); navigate('/admin/import') }} className="speed-dial-btn">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                  </button>
-                </div>
-              </>
-            )}
-
-            {/* Tombol Logout (muncul untuk Admin & Intern) */}
-            <div className="speed-dial-item">
-              <span className="speed-dial-tooltip" style={{ background: 'var(--color-danger)' }}>Keluar</span>
-              <button
-                onClick={() => { setIsFabOpen(false); handleLogout(); }}
-                className="speed-dial-btn danger"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                  <polyline points="16 17 21 12 16 7"></polyline>
-                  <line x1="21" y1="12" x2="9" y2="12"></line>
-                </svg>
-              </button>
-            </div>
-
-          </div>
-
-          <button
-            className={`speed-dial-main ${isFabOpen ? 'open' : ''}`}
-            onClick={() => setIsFabOpen(!isFabOpen)}
-          >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-          </button>
-        </div>
-      )}
 
     </div>
   )

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * CompletionRulesManager.jsx
  *
  * UI Admin untuk mengelola completion_exception_rules di Dexie.
@@ -15,7 +15,7 @@ import { useToast } from '../../contexts/ToastContext'
 function EmptyState() {
   return (
     <div style={{ textAlign: 'center', padding: '40px 20px', color: '#5f6368' }}>
-      <div style={{ fontSize: '32px', marginBottom: '8px' }}>鈿栵笍</div>
+      <div style={{ fontSize: '32px', marginBottom: '8px' }}>⚙️</div>
       <p style={{ margin: 0, fontSize: '14px' }}>Belum ada aturan pengecualian.</p>
       <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#80868b' }}>
         Klik "Tambah Aturan" untuk membuat aturan baru.
@@ -205,7 +205,7 @@ export default function CompletionRulesManager() {
             {/* Pratinjau aturan */}
             {formDeptId && formCondKey && formCondVal && formExemptKeys.length > 0 && (
               <div style={{ padding: '10px 14px', background: '#f6f8fa', border: '1px solid #e1e4e8', borderRadius: '6px', fontSize: '13px', color: '#5f6368' }}>
-                馃搶 <strong>Pratinjau:</strong> Jika <strong>{colLabel(formDeptId, formCondKey)}</strong> = "<em>{formCondVal}</em>",
+                💡 <strong>Pratinjau:</strong> Jika <strong>{colLabel(formDeptId, formCondKey)}</strong> = "<em>{formCondVal}</em>",
                 maka kolom <strong>{formExemptKeys.map(k => colLabel(formDeptId, k)).join(', ')}</strong> tidak wajib diisi.
               </div>
             )}

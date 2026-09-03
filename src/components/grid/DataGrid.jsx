@@ -27,7 +27,7 @@ import { useToast } from '../../contexts/ToastContext'
 import { logActivity } from '../../lib/activityLog'
 import { evaluateRowCompleteness, useLiveExceptionRules } from '../../hooks/useRowCompleteness'
 import EditableCell from './EditableCell'
-import ConfirmDeleteModal from '../ConfirmDeleteModal'
+import { useDialog } from '../../contexts/DialogContext'
 import ExportModal from './ExportModal'
 import ImportModal from './ImportModal'
 
@@ -379,7 +379,7 @@ export default function DataGrid({ locationName, canEdit }) {
   const [showBulkAddModal, setShowBulkAddModal] = useState(false)
   const [showBulkFillModal, setShowBulkFillModal] = useState(false)
   const [showFindReplaceModal, setShowFindReplaceModal] = useState(false)
-  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const { confirm } = useDialog()
   const [deleteTargetIds, setDeleteTargetIds] = useState([])
   
   const [showExportModal, setShowExportModal] = useState(false)
@@ -481,21 +481,26 @@ export default function DataGrid({ locationName, canEdit }) {
     } catch (err) { addToast('Gagal: ' + err.message, 'error') }
   }
 
-  async function handleDelete() {
-    if (!deleteTargetIds.length) return
+  async function handleDelete(ids) {
     try {
-      await bulkDeleteRows(deleteTargetIds, userId)
-      logActivity('bulk_hapus_baris', userId, { count: deleteTargetIds.length })
+      await bulkDeleteRows(ids, userId)
+      logActivity('bulk_hapus_baris', userId, { count: ids.length })
       setSelectedRows(new Set())
       setDeleteTargetIds([])
-      setShowDeleteModal(false)
-      addToast(`${deleteTargetIds.length} baris dihapus.`, 'success')
+      addToast(`${ids.length} baris dihapus.`, 'success')
     } catch (err) { addToast('Gagal hapus: ' + err.message, 'error') }
   }
 
-  function requestDelete(ids) {
+  async function handleDeleteClick(ids) {
     setDeleteTargetIds(ids)
-    setShowDeleteModal(true)
+    const confirmed = await confirm({
+      title: `Hapus ${ids.length} Baris?`,
+      message: `Hapus ${ids.length} baris dari lokasi ${locationName}? Data akan dipindahkan ke Recycle Bin.`,
+      danger: true,
+      confirmText: `Hapus ${ids.length} Baris`
+    })
+    if (!confirmed) { setDeleteTargetIds([]); return }
+    handleDelete(ids)
   }
 
   async function handleDuplicate(row) {
@@ -907,14 +912,7 @@ export default function DataGrid({ locationName, canEdit }) {
       {showFindReplaceModal && (
         <FindReplaceModal rows={rows} columns={columns} onConfirm={handleFindReplace} onCancel={() => setShowFindReplaceModal(false)} />
       )}
-      {showDeleteModal && (
-        <ConfirmDeleteModal
-          itemLabel={`${deleteTargetIds.length} baris dari lokasi ${locationName}`}
-          confirmText={`Hapus ${deleteTargetIds.length} Baris`}
-          onConfirm={handleDelete}
-          onCancel={() => { setShowDeleteModal(false); setDeleteTargetIds([]) }}
-        />
-      )}
+
 
       {showExportModal && (
         <ExportModal

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * itemCodeEngine.js
  *
  * Item Code Engine - SRS v2.0 par.7 (Manual-Assisted Matching)
@@ -177,4 +177,34 @@ export async function addCatalogEntry(departmentId, components, searchKey, itemC
     source,
     created_at: new Date().toISOString(),
   })
+}
+
+// ---------------------------------------------------------------------------
+//  Bulk insert Reference Catalog (Admin: import Excel)
+// ---------------------------------------------------------------------------
+
+/**
+ * Bulk insert banyak entri ke reference_catalog dalam satu transaksi Dexie.
+ * Dipakai oleh ReferenceCatalogImportModal saat Admin mengimport file Excel.
+ *
+ * search_key setiap entri dinormalisasi otomatis (lowercase + collapse whitespace)
+ * agar matching konsisten dengan applyItemCodeMatching().
+ *
+ * @param {string} departmentId
+ * @param {Array<{ components: Object, searchKey: string, itemCode: string }>} entries
+ * @returns {Promise<number>} jumlah entri yang berhasil diinsert
+ */
+export async function bulkAddCatalogEntries(departmentId, entries) {
+  if (!departmentId || !entries?.length) return 0
+  const now = new Date().toISOString()
+  const rows = entries.map(e => ({
+    department_id: departmentId,
+    components: e.components || {},
+    search_key: normalizeTrigger(e.searchKey),
+    item_code: String(e.itemCode ?? '').trim(),
+    source: 'upload',
+    created_at: now,
+  }))
+  await db.reference_catalog.bulkAdd(rows)
+  return rows.length
 }

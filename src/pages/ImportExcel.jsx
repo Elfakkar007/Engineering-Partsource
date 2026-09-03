@@ -10,16 +10,15 @@
  * SRS v2.0 搂10.1
  */
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import * as XLSX from 'xlsx'
-import { useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../lib/db'
 import { useToast } from '../contexts/ToastContext'
 import { useAuth } from '../contexts/AuthContext'
 import { evaluateRowCompleteness } from '../hooks/useRowCompleteness'
 import { logActivity } from '../lib/activityLog'
-import ConfirmDeleteModal from '../components/ConfirmDeleteModal'
+import { useDialog } from '../contexts/DialogContext'
 
 /* ------------------------------------------------------------------ */
 /*  Step indicator                                                       */
@@ -86,17 +85,37 @@ export default function ImportExcel() {
   // Tahap 2
   const [colMapping, setColMapping] = useState({}) // { col_key: excelHeaderName }
 
+  // Routing columns (Opsi B — navigation router, SRS v2.0 §10.1)
+  const [plantColHeader, setPlantColHeader] = useState('')
+  const [locationColHeader, setLocationColHeader] = useState('')
+  const [fallbackLocationId, setFallbackLocationId] = useState('')
+
+  // Schema-free mode: saat dept belum punya kolom, user assign tipe dari header Excel
+  // { [excelHeader]: { label: string, type: 'text'|'number'|'select', is_required: bool, role: 'data'|'router_plant'|'router_loc'|'ignore' } }
+  const [headerTyping, setHeaderTyping] = useState({})
+
   // Tahap 3
-  const [validationResult, setValidationResult] = useState(null) // { validRows, invalidRows }
+  const [validationResult, setValidationResult] = useState(null)
 
   // Tahap 4
   const [isImporting, setIsImporting] = useState(false)
-  const [showConfirm, setShowConfirm] = useState(false)
 
   const fileInputRef = useRef(null)
   const { addToast } = useToast()
   const { currentUser } = useAuth()
-  const navigate = useNavigate()
+  const { confirm } = useDialog()
+
+  // Ketika kolom dipilih sebagai router, otomatis keluarkan dari tabel Mode Adaptif
+  // agar tidak muncul redundan dua kali (di routing section & di tabel mapping)
+  useEffect(() => {
+    const routerCols = [plantColHeader, locationColHeader].filter(Boolean)
+    if (routerCols.length === 0) return
+    setHeaderTyping(prev => {
+      const next = { ...prev }
+      routerCols.forEach(h => delete next[h])
+      return next
+    })
+  }, [plantColHeader, locationColHeader])
 
   // Live queries dari Dexie
   const departments = useLiveQuery(() => db.departments_cache.toArray().then(r => r.sort((a,b) => (a.order??0)-(b.order??0))), [], []) ?? []
@@ -104,6 +123,9 @@ export default function ImportExcel() {
     () => selectedDeptId ? db.locations_cache.where('department_id').equals(selectedDeptId).toArray() : [],
     [selectedDeptId], []
   ) ?? []
+  // Semua lines & locations untuk routing (tidak difilter per dept)
+  const allLines = useLiveQuery(() => db.lines_cache.toArray().then(r => r.sort((a,b) => (a.order??0)-(b.order??0))), [], []) ?? []
+  const allLocations = useLiveQuery(() => db.locations_cache.toArray(), [], []) ?? []
   const deptColumns = useLiveQuery(
     () => selectedDeptId
       ? db.columns_config.where('department_id').equals(selectedDeptId).sortBy('order')
@@ -118,7 +140,49 @@ export default function ImportExcel() {
   ) ?? []
 
   // Visible columns for mapping (tidak include auto-generated)
+  // Kolom yang dipilih sebagai router (Plant/Lokasi) diexclude dari mapping biasa
+  const routerHeaders = new Set([plantColHeader, locationColHeader].filter(Boolean))
   const mappableColumns = deptColumns.filter(c => !c.is_auto && c.is_visible !== false)
+
+  /* ---------------------------------------------------------------- */
+  /*  Routing Helpers (Opsi B)                                          */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Normalisasi nilai Plant/Line: "Line 1", "L1", "1", "line1" → "1"
+   * Dipakai untuk fuzzy-match ke lines_cache.name
+   */
+  function normalizePlant(val) {
+    return String(val ?? '').toLowerCase()
+      .replace(/\s+/g, '')    // hapus semua spasi
+      .replace(/^line/, '')   // hapus prefix "line"
+      .replace(/^l(?=\d)/, '') // hapus prefix "l" jika diikuti angka
+      .trim()
+  }
+
+  /**
+   * Resolve location_id dari nilai Plant + Lokasi pada satu baris Excel.
+   * Jika tidak cocok → kembalikan fallbackLocationId.
+   *
+   * @param {string} plantVal - nilai kolom Plant di baris ini
+   * @param {string} locationVal - nilai kolom Lokasi di baris ini
+   * @returns {{ locationId: string, routed: boolean, debugInfo: string }}
+   */
+  function resolveLocationId(plantVal, locationVal) {
+    if (!plantColHeader && !locationColHeader) {
+      return { locationId: fallbackLocationId || 'auto_fallback', routed: false, debugInfo: 'Tanpa routing' }
+    }
+
+    const p = String(plantVal ?? '').trim()
+    const l = String(locationVal ?? '').trim()
+    
+    if (!p && !l) {
+      return { locationId: fallbackLocationId || 'auto_fallback', routed: false, debugInfo: 'Baris kosong → Fallback/Unassigned' }
+    }
+
+    // Kembalikan marker auto-create, akan dibuat di handleConfirmImport
+    return { locationId: `auto_${p}|${l}`, routed: true, debugInfo: `Otomatis: ${p || 'Unassigned'} → ${l || 'Unassigned'}` }
+  }
 
   /* ---------------------------------------------------------------- */
   /*  File Parsing                                                       */
@@ -164,6 +228,18 @@ export default function ImportExcel() {
           initialMapping[col.key] = match || ''
         })
         setColMapping(initialMapping)
+
+        // Schema-free mode: jika dept belum punya kolom, inisialisasi headerTyping dari semua headers
+        if (mappableColumns.length === 0) {
+          const initTyping = {}
+          const allHeaders = sheets.flatMap(s => s.headers)
+          const uniqueHeaders = [...new Set(allHeaders)]
+          uniqueHeaders.forEach(h => {
+            initTyping[h] = { label: h, type: 'text', is_required: false, role: 'data' }
+          })
+          setHeaderTyping(initTyping)
+        }
+
         setStep(2)
         addToast(`File "${file.name}" berhasil diparsing (${sheets.reduce((s, sh) => s + sh.rows.length, 0)} baris).`, 'success')
       } catch (err) {
@@ -178,32 +254,59 @@ export default function ImportExcel() {
   /*  Validation (Tahap 3)                                              */
   /* ---------------------------------------------------------------- */
   function runValidation() {
+
     const allRows = parsedSheets.flatMap(sheet =>
       sheet.rows.map((row, idx) => {
-        // Gabungkan header 鈫?value dari semua sheet
         const rowObj = {}
         sheet.headers.forEach((h, i) => {
           rowObj[h] = row[i] !== undefined ? String(row[i]).trim() : ''
         })
 
-        // Konversi ke format components berdasarkan mapping
+        // Routing: resolve location_id per baris dari kolom Plant + Lokasi
+        const plantVal = plantColHeader ? rowObj[plantColHeader] : ''
+        const locationVal = locationColHeader ? rowObj[locationColHeader] : ''
+        const routing = resolveLocationId(plantVal, locationVal)
+
+        // Konversi ke format components
         const components = {}
-        mappableColumns.forEach(col => {
-          const excelHeader = colMapping[col.key]
-          if (excelHeader && rowObj[excelHeader] !== undefined) {
-            let val = rowObj[excelHeader]
-            if (col.type === 'number' && val !== '') {
+
+        if (mappableColumns.length > 0) {
+          // Mode normal: pakai colMapping
+          mappableColumns.forEach(col => {
+            const excelHeader = colMapping[col.key]
+            if (!excelHeader || routerHeaders.has(excelHeader)) return
+            if (rowObj[excelHeader] !== undefined) {
+              let val = rowObj[excelHeader]
+              if (col.type === 'number' && val !== '') {
+                const num = Number(String(val).replace(',', '.'))
+                val = isNaN(num) ? val : num
+              }
+              components[col.key] = val
+            }
+          })
+        } else {
+          // Schema-free mode: pakai headerTyping, key = sanitized header
+          Object.entries(headerTyping).forEach(([h, cfg]) => {
+            if (cfg.role === 'ignore' || cfg.role === 'router_plant' || cfg.role === 'router_loc') return
+            const colKey = 'col_' + h.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 20)
+            let val = rowObj[h] ?? ''
+            if (cfg.type === 'number' && val !== '') {
               const num = Number(String(val).replace(',', '.'))
               val = isNaN(num) ? val : num
             }
-            components[col.key] = val
-          }
-        })
+            components[colKey] = val
+          })
+        }
 
         return {
           sheetName: sheet.name,
           rowIndex: idx + 2, // Excel 1-indexed + header row
           components,
+          resolvedLocationId: routing.locationId,
+          routed: routing.routed,
+          routingDebug: routing.debugInfo,
+          plantVal,
+          locationVal,
         }
       })
     )
@@ -216,11 +319,9 @@ export default function ImportExcel() {
       if (isComplete) {
         validRows.push(r)
       } else {
-        // Temukan kolom apa yang kosong tapi wajib
         const missingCols = deptColumns
           .filter(col => col.is_required && !col.is_auto)
           .filter(col => {
-            // Cek exception rules
             const anyRuleMatch = exceptionRules.some(rule => {
               const condVal = String(r.components[rule.condition_column_key] ?? '').trim().toLowerCase()
               const expectedVal = String(rule.condition_value ?? '').trim().toLowerCase()
@@ -235,37 +336,148 @@ export default function ImportExcel() {
       }
     })
 
-    setValidationResult({ validRows, invalidRows, allRows })
+    // Bangun routing summary: { locationId → { name, lineId, count, unrouted } }
+    const routingMap = {}
+    allRows.forEach(r => {
+      const locId = r.resolvedLocationId || fallbackLocationId
+      if (!routingMap[locId]) {
+        const loc = allLocations.find(l => l.id === locId)
+        const line = allLines.find(l => l.id === loc?.line_id)
+        routingMap[locId] = { locId, locName: loc?.name || locId, lineName: line?.name || '', count: 0, unroutedCount: 0 }
+      }
+      routingMap[locId].count++
+      if (!r.routed && (plantColHeader || locationColHeader)) routingMap[locId].unroutedCount++
+    })
+
+    setValidationResult({ validRows, invalidRows, allRows, routingSummary: Object.values(routingMap) })
     setStep(3)
   }
 
   /* ---------------------------------------------------------------- */
-  /*  Commit Import (Tahap 4)                                           */
+  /*  Commit Import (Tahap 4) — support schema-free mode               */
   /* ---------------------------------------------------------------- */
   async function handleCommitImport() {
-    setShowConfirm(false)
+    const deptName = departments.find(d => d.id === selectedDeptId)?.name || ''
+    const rowCount = validationResult?.allRows?.length || 0
+    const locCount = validationResult?.routingSummary?.length || 1
+    const routingNote = (plantColHeader || locationColHeader)
+      ? `Data akan didistribusikan ke ${locCount} lokasi berdasarkan kolom routing.`
+      : `Semua data akan masuk ke satu lokasi.`
+    const confirmed = await confirm({
+      title: 'Konfirmasi Import Data',
+      message: `Anda akan mengimport ${rowCount} baris ke department ${deptName}.\n\n${routingNote}`,
+      confirmText: 'Ya, Import Sekarang'
+    })
+    if (!confirmed) return
     setIsImporting(true)
 
     try {
+      // Schema-free: auto-create columns_config SEBELUM insert records
+      if (mappableColumns.length === 0 && Object.keys(headerTyping).length > 0) {
+        const now = new Date().toISOString()
+        let order = 1
+        const newCols = []
+        for (const [h, cfg] of Object.entries(headerTyping)) {
+          if (cfg.role === 'ignore' || cfg.role === 'router_plant' || cfg.role === 'router_loc') continue
+          const colKey = 'col_' + h.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 20)
+          newCols.push({
+            department_id: selectedDeptId,
+            key: colKey,
+            label: cfg.label || h,
+            type: cfg.type || 'text',
+            is_required: cfg.is_required || false,
+            is_auto: false,
+            is_visible: true,
+            order: order++,
+            created_at: now,
+          })
+        }
+        if (newCols.length > 0) {
+          await db.columns_config.bulkAdd(newCols)
+          console.log(`[import] Auto-created ${newCols.length} kolom untuk dept ${selectedDeptId}`)
+        }
+
+        // Set plant/location router header dari headerTyping jika belum diset
+        const plantEntry = Object.entries(headerTyping).find(([, c]) => c.role === 'router_plant')
+        const locEntry = Object.entries(headerTyping).find(([, c]) => c.role === 'router_loc')
+        if (plantEntry && !plantColHeader) setPlantColHeader(plantEntry[0])
+        if (locEntry && !locationColHeader) setLocationColHeader(locEntry[0])
+      }
       const importBatchId = Date.now()
       const now = new Date().toISOString()
       const userId = currentUser?.email || currentUser?.id || ''
 
-      // Gunakan lokasi pertama dari department terpilih sebagai default
-      // (di implementasi penuh, user bisa pilih per-sheet)
-      const defaultLocation = locations[0]
-      if (!defaultLocation) {
-        addToast('Tidak ada lokasi untuk department ini. Tambahkan lokasi di Admin 鈫?Hierarki.', 'error')
+      // Routing aktif: setiap baris punya resolvedLocationId masing-masing
+      const allValidRows = validationResult?.validRows || []
+
+      if (!allValidRows.length) {
+        addToast('Tidak ada baris valid untuk diimport.', 'error')
         setIsImporting(false)
         return
       }
 
-      // Tulis langsung ke Dexie (offline-first)
-      const allValidRows = validationResult?.validRows || []
+      // --- AUTO-CREATE LOKASI ---
+      const uniqueLocsToCreate = new Set()
+      allValidRows.forEach(r => {
+        if (typeof r.resolvedLocationId === 'string' && r.resolvedLocationId.startsWith('auto_')) {
+          uniqueLocsToCreate.add(r.resolvedLocationId)
+        }
+      })
+      
+      const realLocationIds = {}
+      
+      for (const autoId of uniqueLocsToCreate) {
+        if (autoId === 'auto_fallback') {
+           let unassignedLine = allLines.find(l => l.name === 'Unassigned')
+           if (!unassignedLine) {
+             const newId = 'local_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+             await db.lines_cache.add({ id: newId, name: 'Unassigned', order: 999 })
+             unassignedLine = { id: newId, name: 'Unassigned' }
+             allLines.push(unassignedLine)
+           }
+           let unassignedLoc = allLocations.find(l => l.line_id === unassignedLine.id && l.department_id === selectedDeptId && l.name === 'Unassigned')
+           if (!unassignedLoc) {
+             const newId = 'local_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+             await db.locations_cache.add({ id: newId, name: 'Unassigned', line_id: unassignedLine.id, department_id: selectedDeptId, order: 999 })
+             unassignedLoc = { id: newId }
+             allLocations.push(unassignedLoc)
+           }
+           realLocationIds[autoId] = unassignedLoc.id
+           continue
+        }
+        
+        const [plantVal, locVal] = autoId.replace('auto_', '').split('|')
+        const pName = plantVal || 'Unassigned'
+        const lName = locVal || 'Unassigned'
+        const normP = normalizePlant(pName)
+        const normL = lName.toLowerCase().trim()
+        
+        let line = allLines.find(l => normalizePlant(l.name) === normP)
+        if (!line) {
+          const newId = 'local_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+          await db.lines_cache.add({ id: newId, name: pName, order: allLines.length + 1 })
+          line = { id: newId, name: pName }
+          allLines.push(line)
+        }
+        
+        let loc = allLocations.find(l => l.line_id === line.id && l.department_id === selectedDeptId && l.name.toLowerCase().trim() === normL)
+        if (!loc) {
+          const newId = 'local_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+          await db.locations_cache.add({ id: newId, name: lName, line_id: line.id, department_id: selectedDeptId, order: allLocations.length + 1 })
+          loc = { id: newId }
+          allLocations.push(loc)
+        }
+        
+        realLocationIds[autoId] = loc.id
+      }
+
       const rowsToInsert = allValidRows.map(r => ({
-        location_id: defaultLocation.id,
+        location_id: (r.resolvedLocationId && r.resolvedLocationId.startsWith('auto_')) 
+            ? realLocationIds[r.resolvedLocationId] 
+            : r.resolvedLocationId,
         department_id: selectedDeptId,
         pb_id: null,
+        // components TIDAK mengandung nilai kolom Plant & Lokasi (sudah diexclude di runValidation)
         components: r.components,
         status_completeness: true,
         flag: null,
@@ -298,14 +510,22 @@ export default function ImportExcel() {
         }
       })
 
+      // Hitung ringkasan untuk log
+      const locCounts = {}
+      rowsToInsert.forEach(r => { locCounts[r.location_id] = (locCounts[r.location_id] || 0) + 1 })
+
       logActivity('import_excel', userId, {
         importBatchId,
         totalRows: rowsToInsert.length,
         department_id: selectedDeptId,
-        location_id: defaultLocation.id,
+        routing_active: !!(plantColHeader || locationColHeader),
+        location_distribution: locCounts,
       })
 
-      addToast(`Import selesai! ${rowsToInsert.length} baris berhasil ditambahkan.`, 'success', { duration: 8000 })
+      const routingNote = (plantColHeader || locationColHeader)
+        ? ` (didistribusikan ke ${Object.keys(locCounts).length} lokasi)`
+        : ''
+      addToast(`Import selesai! ${rowsToInsert.length} baris berhasil ditambahkan${routingNote}.`, 'success', { duration: 8000 })
       resetAll()
     } catch (err) {
       console.error(err)
@@ -320,6 +540,10 @@ export default function ImportExcel() {
     setFileName('')
     setParsedSheets([])
     setColMapping({})
+    setPlantColHeader('')
+    setLocationColHeader('')
+    setFallbackLocationId('')
+    setHeaderTyping({})
     setValidationResult(null)
   }
 
@@ -334,18 +558,14 @@ export default function ImportExcel() {
   /*  Render                                                             */
   /* ---------------------------------------------------------------- */
   return (
-    <div style={{ minHeight: '100svh', background: '#f8f9fa' }}>
-      <header style={{ background: '#fff', borderBottom: '1px solid #e1e4e8', padding: '16px 24px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-        <button className="btn-secondary" style={{ padding: '8px' }} onClick={() => navigate('/')}>&larr;</button>
-        <div>
-          <h1 style={{ fontSize: '20px', fontWeight: 600, color: '#1f2328', margin: 0 }}>Import Data Excel</h1>
-          <p style={{ fontSize: '13px', color: '#5f6368', margin: '4px 0 0' }}>
+    <div style={{ background: '#f8f9fa', minHeight: '100%' }}>
+      <div style={{ padding: '20px 28px', maxWidth: '1100px', margin: '0 auto' }}>
+        <div style={{ marginBottom: '16px' }}>
+          <h1 style={{ margin: '0 0 4px', fontSize: '20px', fontWeight: 700, color: '#1f2328' }}>Import Data Excel</h1>
+          <p style={{ margin: 0, fontSize: '13px', color: '#5f6368' }}>
             Tahap {step} dari {STEP_LABELS.length}: {STEP_LABELS[step - 1]}
           </p>
         </div>
-      </header>
-
-      <main style={{ padding: '24px', maxWidth: '1100px', margin: '0 auto' }}>
         <StepBar step={step} />
 
         {/* ---- Tahap 1: Pilih Department & Upload File ---- */}
@@ -415,72 +635,259 @@ export default function ImportExcel() {
         )}
 
         {/* ---- Tahap 2: Mapping Kolom ---- */}
-        {step === 2 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <div style={{ background: '#fff', border: '1px solid #d0d7de', borderRadius: '8px', overflow: 'hidden' }}>
-              <div style={{ padding: '16px 20px', background: '#f6f8fa', borderBottom: '1px solid #e1e4e8' }}>
-                <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#1f2328' }}>Pemetaan Kolom</h3>
-                <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#5f6368' }}>
-                  File: <strong>{fileName}</strong> &bull; {totalExcelRows} baris ditemukan.
-                  Petakan setiap kolom sistem ke kolom Excel yang sesuai.
-                </p>
-              </div>
-              <div style={{ padding: '16px 20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
-                {mappableColumns.map(col => (
-                  <div key={col.key}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: '#5f6368', display: 'block', marginBottom: '4px' }}>
-                      {col.label}
-                      {col.is_required && <span style={{ color: '#cf222e', marginLeft: '3px' }}>*</span>}
-                      <span style={{ marginLeft: '6px', fontSize: '10px', color: '#80868b', fontWeight: 400 }}>({col.type})</span>
+        {step === 2 && (() => {
+          const canProceed = true
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+              {/* === Bagian Routing (Opsi B) === */}
+              <div style={{ background: '#fff', border: '2px solid #0969da', borderRadius: '8px', overflow: 'hidden' }}>
+                <div style={{ padding: '14px 20px', background: '#ddf4ff', borderBottom: '1px solid #b6e3ff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0969da" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
+                  </svg>
+                  <div>
+                    <span style={{ fontSize: '13px', fontWeight: 700, color: '#0969da' }}>Routing Navigasi (Auto-Create)</span>
+                    <span style={{ fontSize: '12px', color: '#0969da', marginLeft: '8px', fontWeight: 400 }}>
+                      Pilih kolom Excel penentu Line dan Lokasi. <strong>Sistem otomatis membuatkan Lokasi/Line baru jika belum ada!</strong>
+                    </span>
+                  </div>
+                </div>
+                <div style={{ padding: '16px 20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '14px' }}>
+                  {/* Plant / Line column */}
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, color: '#0969da', display: 'block', marginBottom: '4px' }}>
+                      Kolom Line / Plant
                     </label>
                     <select
-                      value={colMapping[col.key] || ''}
-                      onChange={e => setColMapping(prev => ({ ...prev, [col.key]: e.target.value }))}
-                      style={{ width: '100%', padding: '6px 8px', border: `1px solid ${colMapping[col.key] ? '#188038' : col.is_required ? '#cf222e' : '#d0d7de'}`, borderRadius: '6px', fontSize: '13px', background: '#fff' }}
+                      value={plantColHeader}
+                      onChange={e => setPlantColHeader(e.target.value)}
+                      style={{ width: '100%', padding: '6px 8px', border: `1px solid ${plantColHeader ? '#0969da' : '#d0d7de'}`, borderRadius: '6px', fontSize: '13px', background: '#fff' }}
                     >
-                      <option value="">-- Abaikan / Tidak Ada --</option>
+                      <option value=''>-- Tidak ada / Abaikan --</option>
                       {allExcelHeaders.map(h => (
-                        <option key={h} value={h}>{h}</option>
+                        <option key={h} value={h} disabled={h === locationColHeader}>{h}</option>
                       ))}
                     </select>
+                    <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#5f6368' }}>mis. kolom "Plant", "Line", "Area"</p>
                   </div>
-                ))}
-              </div>
-              {unmappedRequired.length > 0 && (
-                <div style={{ margin: '0 20px 16px', padding: '10px 14px', background: '#ffebe9', border: '1px solid #cf222e', borderRadius: '6px', fontSize: '13px', color: '#cf222e' }}>
-                  鈿狅笍 Kolom wajib belum dipetakan: <strong>{unmappedRequired.map(c => c.label).join(', ')}</strong>
+
+                  {/* Location column */}
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, color: '#0969da', display: 'block', marginBottom: '4px' }}>
+                      Kolom Lokasi
+                    </label>
+                    <select
+                      value={locationColHeader}
+                      onChange={e => setLocationColHeader(e.target.value)}
+                      style={{ width: '100%', padding: '6px 8px', border: `1px solid ${locationColHeader ? '#0969da' : '#d0d7de'}`, borderRadius: '6px', fontSize: '13px', background: '#fff' }}
+                    >
+                      <option value=''>-- Tidak ada / Abaikan --</option>
+                      {allExcelHeaders.map(h => (
+                        <option key={h} value={h} disabled={h === plantColHeader}>{h}</option>
+                      ))}
+                    </select>
+                    <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#5f6368' }}>mis. kolom "Location", "Lokasi"</p>
+                  </div>
+
+                  {/* Fallback location */}
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, color: '#0969da', display: 'block', marginBottom: '4px' }}>
+                      Lokasi Fallback (Opsional)
+                    </label>
+                    <select
+                      value={fallbackLocationId}
+                      onChange={e => setFallbackLocationId(e.target.value)}
+                      style={{ width: '100%', padding: '6px 8px', border: `1px solid #d0d7de`, borderRadius: '6px', fontSize: '13px', background: '#fff' }}
+                    >
+                      <option value=''>-- Auto (Akan dibuatkan "Unassigned") --</option>
+                      {allLocations
+                        .filter(l => l.department_id === selectedDeptId)
+                        .map(l => {
+                          const line = allLines.find(ln => ln.id === l.line_id)
+                          return <option key={l.id} value={l.id}>{line?.name} — {l.name}</option>
+                        })}
+                    </select>
+                    <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#5f6368' }}>Tempat penampungan jika baris excel tidak punya nama Line/Lokasi.</p>
+                  </div>
                 </div>
-              )}
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <button className="btn-secondary" onClick={resetAll} style={{ padding: '8px 16px' }}>Mulai Ulang</button>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button className="btn-secondary" onClick={() => setStep(1)} style={{ padding: '8px 16px' }}>鈫?Kembali</button>
-                <button className="btn-primary" onClick={runValidation} style={{ padding: '8px 16px' }}>
-                  Lanjut ke Validasi 鈫?                </button>
+
+                {(plantColHeader || locationColHeader) && (
+                  <div style={{ margin: '0 20px 14px', padding: '8px 12px', background: '#e6f4ea', border: '1px solid #188038', borderRadius: '6px', fontSize: '12px', color: '#188038' }}>
+                    ✨ Kolom <strong>{[plantColHeader, locationColHeader].filter(Boolean).join(', ')}</strong> akan otomatis dikonversi jadi hierarki Lokasi secara ajaib!
+                  </div>
+                )}
+              </div>
+
+              {/* === Bagian Mapping / Schema-Free Kolom Data === */}
+              <div style={{ background: '#fff', border: `1px solid ${mappableColumns.length === 0 ? '#8250df' : '#d0d7de'}`, borderRadius: '8px', overflow: 'hidden' }}>
+                <div style={{ padding: '16px 20px', background: mappableColumns.length === 0 ? '#fbefff' : '#f6f8fa', borderBottom: `1px solid ${mappableColumns.length === 0 ? '#d8b4fe' : '#e1e4e8'}` }}>
+                  <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: mappableColumns.length === 0 ? '#8250df' : '#1f2328' }}>
+                    {mappableColumns.length === 0 ? '✨ Mode Adaptif — Kolom Otomatis dari Excel' : 'Pemetaan Kolom Data'}
+                  </h3>
+                  <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#5f6368' }}>
+                    {mappableColumns.length === 0
+                      ? `Department ini belum punya kolom. Sistem akan membuat kolom baru otomatis dari ${allExcelHeaders.length} header file Excel Anda.`
+                      : `File: `}{mappableColumns.length > 0 && <strong>{fileName}</strong>}
+                    {mappableColumns.length > 0 && ` • ${totalExcelRows} baris. Petakan kolom sistem ke kolom Excel.`}
+                  </p>
+                </div>
+
+                {mappableColumns.length === 0 ? (
+                  /* ---- Schema-Free: tabel assign tipe per header ---- */
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                      <thead>
+                        <tr style={{ background: '#f6f8fa', borderBottom: '1px solid #e1e4e8' }}>
+                          <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 600, color: '#5f6368', width: '25%' }}>Header Excel</th>
+                          <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 600, color: '#5f6368', width: '25%' }}>Label Kolom</th>
+                          <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 600, color: '#5f6368', width: '20%' }}>Tipe Data</th>
+                          <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 600, color: '#5f6368', width: '15%' }}>Fungsi</th>
+                          <th style={{ padding: '8px 14px', textAlign: 'center', fontWeight: 600, color: '#5f6368', width: '10%' }}>Wajib?</th>
+                          <th style={{ padding: '8px 14px', textAlign: 'center', fontWeight: 600, color: '#5f6368', width: '5%' }}>Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(headerTyping).map(([h, cfg], i) => (
+                          <tr key={h} style={{ borderBottom: '1px solid #f1f3f4', background: i % 2 === 0 ? '#fff' : '#fafbfc' }}>
+                            <td style={{ padding: '8px 14px', fontWeight: 500, color: '#1f2328' }}>
+                              <code style={{ background: '#f6f8fa', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{h}</code>
+                            </td>
+                            <td style={{ padding: '6px 14px' }}>
+                              <input
+                                value={cfg.label}
+                                onChange={e => setHeaderTyping(prev => ({ ...prev, [h]: { ...cfg, label: e.target.value } }))}
+                                style={{ width: '100%', padding: '5px 8px', border: '1px solid #d0d7de', borderRadius: '5px', fontSize: '12px' }}
+                              />
+                            </td>
+                            <td style={{ padding: '6px 14px' }}>
+                              <select
+                                value={cfg.type}
+                                onChange={e => setHeaderTyping(prev => ({ ...prev, [h]: { ...cfg, type: e.target.value } }))}
+                                style={{ width: '100%', padding: '5px 8px', border: '1px solid #d0d7de', borderRadius: '5px', fontSize: '12px', background: '#fff' }}
+                                disabled={cfg.role !== 'data'}
+                              >
+                                <option value='text'>Teks</option>
+                                <option value='number'>Angka</option>
+                                <option value='select'>Pilihan</option>
+                                <option value='gdrive_link'>🖼️ Link Foto (GDrive)</option>
+                              </select>
+                            </td>
+                            <td style={{ padding: '6px 14px' }}>
+                              <select
+                                value={cfg.role}
+                                onChange={e => setHeaderTyping(prev => ({ ...prev, [h]: { ...cfg, role: e.target.value } }))}
+                                style={{ width: '100%', padding: '5px 8px', border: `1px solid ${cfg.role !== 'data' ? '#8250df' : '#d0d7de'}`, borderRadius: '5px', fontSize: '12px', background: '#fff', color: cfg.role !== 'data' ? '#8250df' : '#1f2328', fontWeight: cfg.role !== 'data' ? 600 : 400 }}
+                              >
+                                <option value='data'>Data Kolom</option>
+                                <option value='router_plant'>🔀 Router Line</option>
+                                <option value='router_loc'>🔀 Router Lokasi</option>
+                                <option value='ignore'>— Abaikan</option>
+                              </select>
+                            </td>
+                            <td style={{ padding: '6px 14px', textAlign: 'center' }}>
+                              <input
+                                type='checkbox'
+                                checked={cfg.is_required}
+                                onChange={e => setHeaderTyping(prev => ({ ...prev, [h]: { ...cfg, is_required: e.target.checked } }))}
+                                disabled={cfg.role !== 'data'}
+                                style={{ width: '16px', height: '16px', accentColor: '#188038', cursor: 'pointer' }}
+                              />
+                            </td>
+                            <td style={{ padding: '6px 14px', textAlign: 'center' }}>
+                              <button 
+                                onClick={() => {
+                                  setHeaderTyping(prev => {
+                                    const next = { ...prev }
+                                    delete next[h]
+                                    return next
+                                  })
+                                }}
+                                title="Hapus kolom ini dari import"
+                                style={{ background: 'transparent', border: 'none', color: '#cf222e', cursor: 'pointer', padding: '4px', borderRadius: '4px' }}
+                                onMouseOver={(e) => e.currentTarget.style.background = '#ffebe9'}
+                                onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
+                              >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                </svg>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div style={{ padding: '10px 14px', background: '#fbefff', borderTop: '1px solid #d8b4fe', fontSize: '12px', color: '#6e40c9' }}>
+                      ✨ Kolom dengan fungsi <strong>Data Kolom</strong> akan otomatis dibuat di schema department ini. Kolom <strong>Router</strong> hanya dipakai untuk mengarahkan baris ke Line/Lokasi yang benar dan tidak disimpan ke grid.
+                    </div>
+                  </div>
+                ) : (
+                  /* ---- Mode Normal: dropdown mapping ---- */
+                  <>
+                    <div style={{ padding: '16px 20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
+                      {mappableColumns.map(col => (
+                        <div key={col.key}>
+                          <label style={{ fontSize: '12px', fontWeight: 600, color: '#5f6368', display: 'block', marginBottom: '4px' }}>
+                            {col.label}
+                            {col.is_required && <span style={{ color: '#cf222e', marginLeft: '3px' }}>*</span>}
+                            <span style={{ marginLeft: '6px', fontSize: '10px', color: '#80868b', fontWeight: 400 }}>({col.type})</span>
+                          </label>
+                          <select
+                            value={colMapping[col.key] || ''}
+                            onChange={e => setColMapping(prev => ({ ...prev, [col.key]: e.target.value }))}
+                            style={{ width: '100%', padding: '6px 8px', border: `1px solid ${colMapping[col.key] ? '#188038' : col.is_required ? '#cf222e' : '#d0d7de'}`, borderRadius: '6px', fontSize: '13px', background: '#fff' }}
+                          >
+                            <option value=''>-- Abaikan / Tidak Ada --</option>
+                            {allExcelHeaders
+                              .filter(h => !routerHeaders.has(h))
+                              .map(h => (
+                                <option key={h} value={h}>{h}</option>
+                              ))}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                    {unmappedRequired.length > 0 && (
+                      <div style={{ margin: '0 20px 16px', padding: '10px 14px', background: '#ffebe9', border: '1px solid #cf222e', borderRadius: '6px', fontSize: '13px', color: '#cf222e' }}>
+                        &#x26A0; Kolom wajib belum dipetakan: <strong>{unmappedRequired.map(c => c.label).join(', ')}</strong>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <button className="btn-secondary" onClick={resetAll} style={{ padding: '8px 16px' }}>Mulai Ulang</button>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <button className="btn-secondary" onClick={() => setStep(1)} style={{ padding: '8px 16px' }}>← Kembali</button>
+                  <button className="btn-primary" onClick={runValidation} style={{ padding: '8px 16px' }}>
+                    Lanjut ke Validasi →
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* ---- Tahap 3: Validasi ---- */}
         {step === 3 && validationResult && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* Summary */}
+
+            {/* Summary stats */}
             <div style={{ background: '#fff', border: '1px solid #d0d7de', borderRadius: '8px', overflow: 'hidden' }}>
               <div style={{ padding: '16px 20px', background: '#f6f8fa', borderBottom: '1px solid #e1e4e8' }}>
                 <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#1f2328' }}>Ringkasan Validasi</h3>
                 <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#5f6368' }}>
-                  Evaluasi kelengkapan baris berdasarkan konfigurasi department & aturan pengecualian.
+                  Evaluasi kelengkapan baris berdasarkan konfigurasi department &amp; aturan pengecualian.
                 </p>
               </div>
-              <div style={{ padding: '20px', display: 'flex', gap: '16px' }}>
+              <div style={{ padding: '20px', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                 {[
-                  { label: 'Baris Lengkap \u2713', value: validationResult.validRows.length, color: '#1a7f37', bg: '#e6f4ea' },
+                  { label: 'Baris Lengkap ✓', value: validationResult.validRows.length, color: '#1a7f37', bg: '#e6f4ea' },
                   { label: 'Baris Tidak Lengkap', value: validationResult.invalidRows.length, color: validationResult.invalidRows.length > 0 ? '#cf222e' : '#5f6368', bg: validationResult.invalidRows.length > 0 ? '#ffebe9' : '#f6f8fa' },
                   { label: 'Total Baris', value: validationResult.allRows.length, color: '#1f2328', bg: '#f6f8fa' },
                 ].map(s => (
-                  <div key={s.label} style={{ flex: 1, padding: '16px', background: s.bg, borderRadius: '8px', textAlign: 'center', border: `1px solid ${s.color}30` }}>
+                  <div key={s.label} style={{ flex: 1, minWidth: '100px', padding: '16px', background: s.bg, borderRadius: '8px', textAlign: 'center', border: `1px solid ${s.color}30` }}>
                     <div style={{ fontSize: '32px', fontWeight: 700, color: s.color }}>{s.value}</div>
                     <div style={{ fontSize: '12px', color: '#5f6368', marginTop: '4px' }}>{s.label}</div>
                   </div>
@@ -488,13 +895,53 @@ export default function ImportExcel() {
               </div>
             </div>
 
-            {/* Error detail */}
+            {/* Routing summary — hanya tampil jika routing aktif */}
+            {(plantColHeader || locationColHeader) && validationResult.routingSummary?.length > 0 && (
+              <div style={{ background: '#fff', border: '1px solid #0969da', borderRadius: '8px', overflow: 'hidden' }}>
+                <div style={{ padding: '12px 20px', background: '#ddf4ff', borderBottom: '1px solid #b6e3ff' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#0969da' }}>&#x1F4CD; Distribusi Routing</span>
+                  <span style={{ fontSize: '12px', color: '#0969da', marginLeft: '8px' }}>
+                    Baris akan didistribusikan ke {validationResult.routingSummary.length} lokasi
+                  </span>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead>
+                      <tr style={{ background: '#f6f8fa', borderBottom: '1px solid #e1e4e8' }}>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#5f6368' }}>Line</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#5f6368' }}>Lokasi</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 600, color: '#5f6368' }}>Jumlah Baris</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 600, color: '#5f6368' }}>Fallback</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {validationResult.routingSummary.map((r, i) => (
+                        <tr key={r.locId} style={{ borderBottom: '1px solid #f1f3f4', background: i % 2 === 0 ? '#fff' : '#fafbfc' }}>
+                          <td style={{ padding: '8px 12px', color: '#1f2328', fontWeight: 500 }}>{r.lineName || '—'}</td>
+                          <td style={{ padding: '8px 12px', color: '#1f2328' }}>{r.locName}</td>
+                          <td style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 700, color: '#1a7f37' }}>{r.count}</td>
+                          <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                            {r.unroutedCount > 0 && (
+                              <span style={{ background: '#fff8c5', color: '#7d4e00', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600 }}>
+                                {r.unroutedCount} tidak cocok
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Error detail — baris tidak lengkap */}
             {validationResult.invalidRows.length > 0 && (
               <div style={{ background: '#fff', border: '1px solid #cf222e', borderRadius: '8px', overflow: 'hidden' }}>
                 <div style={{ padding: '12px 20px', background: '#ffebe9', borderBottom: '1px solid #ffc4be', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '14px', fontWeight: 600, color: '#cf222e' }}>鈿?Baris dengan Data Tidak Lengkap</span>
+                  <span style={{ fontSize: '14px', fontWeight: 600, color: '#cf222e' }}>&#x26A0; Baris dengan Data Tidak Lengkap</span>
                   <span style={{ fontSize: '12px', color: '#5f6368' }}>
-                    (Baris ini <strong>tetap akan diimpor</strong> 鈥?harap lengkapi data kemudian)
+                    (Baris ini <strong>tetap akan diimpor</strong> &mdash; harap lengkapi data kemudian)
                   </span>
                 </div>
                 <div style={{ overflowX: 'auto', maxHeight: '300px' }}>
@@ -508,7 +955,7 @@ export default function ImportExcel() {
                     <tbody>
                       {validationResult.invalidRows.map((r, i) => (
                         <tr key={i} style={{ borderBottom: '1px solid #f1f3f4', background: i % 2 === 0 ? '#fff' : '#fafbfc' }}>
-                          <td style={{ padding: '8px 12px', color: '#cf222e', fontWeight: 600 }}>{r.sheetName} 路 Baris {r.rowIndex}</td>
+                          <td style={{ padding: '8px 12px', color: '#cf222e', fontWeight: 600 }}>{r.sheetName} &middot; Baris {r.rowIndex}</td>
                           <td style={{ padding: '8px 12px', color: '#5f6368' }}>
                             {r.missingCols.map(mc => (
                               <span key={mc} style={{ display: 'inline-block', background: '#ffebe9', color: '#cf222e', padding: '1px 6px', borderRadius: '4px', fontSize: '11px', marginRight: '4px' }}>{mc}</span>
@@ -524,30 +971,20 @@ export default function ImportExcel() {
 
             {/* Action bar */}
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '16px 20px', background: '#fff', border: '1px solid #d0d7de', borderRadius: '8px' }}>
-              <button className="btn-secondary" onClick={() => setStep(2)} style={{ padding: '8px 16px' }}>鈫?Kembali ke Mapping</button>
+              <button className="btn-secondary" onClick={() => setStep(2)} style={{ padding: '8px 16px' }}>← Kembali ke Mapping</button>
               <button
                 className="btn-primary"
-                onClick={() => setShowConfirm(true)}
+                onClick={handleCommitImport}
                 style={{ padding: '8px 20px' }}
-                disabled={validationResult.validRows.length === 0}
+                disabled={validationResult.allRows.length === 0}
               >
-                Import {validationResult.validRows.length} Baris Sekarang 鈫?              </button>
+                Import {validationResult.allRows.length} Baris Sekarang &rarr;
+              </button>
             </div>
           </div>
         )}
-      </main>
+      </div>
 
-      {/* Confirm dialog */}
-      {showConfirm && (
-        <ConfirmDeleteModal
-          title="Konfirmasi Import Data"
-          itemLabel={`${validationResult?.validRows?.length || 0} baris ke department yang dipilih`}
-          warningText={`Data akan ditambahkan ke lokasi pertama di department ini. Proses tidak dapat dibatalkan secara otomatis.`}
-          confirmText="Ya, Import Sekarang"
-          onConfirm={handleCommitImport}
-          onCancel={() => setShowConfirm(false)}
-        />
-      )}
 
       {isImporting && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

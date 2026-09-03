@@ -1,5 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from '../lib/db'
 import MainLayout from '../components/layout/MainLayout'
 import ThreeTierNav from '../components/navigation/ThreeTierNav'
 import DataGrid from '../components/grid/DataGrid'
@@ -8,11 +10,6 @@ import { useNavigation } from '../contexts/NavigationContext'
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
 /* ------------------------------------------------------------------ */
-function formatLineName(lineId) {
-  const num = lineId?.replace('line', '')
-  return num ? `Line ${num}` : lineId
-}
-
 function getUserLineId(assignedLine) {
   if (!assignedLine) return null
   if (typeof assignedLine === 'number') return `line${assignedLine}`
@@ -35,7 +32,13 @@ export default function LinePage() {
   const userLineId = getUserLineId(currentUser?.assignedLine)
   const effectiveCanEdit = canEdit && (isAdmin || !userLineId || userLineId === lineId)
 
-  const lineName = formatLineName(lineId)
+  // Lookup nama Line dari Dexie — support semua format ID (line1, UUID, local_xxx)
+  const lineRecord = useLiveQuery(
+    () => lineId ? db.lines_cache.get(lineId) : null,
+    [lineId]
+  )
+  const lineName = lineRecord?.name || lineId
+
   const activeLocation = locations?.find(l => l.id === activeLocationId)
   const activeLocationName = activeLocation ? activeLocation.name : activeLocationId
 

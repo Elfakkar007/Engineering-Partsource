@@ -15,6 +15,7 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { exportToExcel } from '../../lib/excelEngine'
+import { useDialog } from '../../contexts/DialogContext'
 
 /**
  * @param {Object}   props
@@ -35,6 +36,7 @@ export default function ExportModal({
   deptName = '',
   onClose,
 }) {
+  const { alert } = useDialog()
   const [scope, setScope] = useState(
     selectedRows?.size > 0 ? 'selected'
     : filteredRows?.length < allRows?.length ? 'filtered'
@@ -72,7 +74,7 @@ export default function ExportModal({
       onClose()
     } catch (err) {
       console.error('[ExportModal] export error:', err)
-      alert('Gagal mengekspor: ' + err.message)
+      alert({ title: 'Gagal Ekspor', message: 'Terjadi kesalahan: ' + err.message, danger: true })
     } finally {
       setIsExporting(false)
     }

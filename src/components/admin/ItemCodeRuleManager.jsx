@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ItemCodeRuleManager.jsx
  *
  * Panel Konfigurasi Item Code per Department — SRS v2.0 par.7
@@ -19,7 +19,9 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../../lib/db'
 import { useToast } from '../../contexts/ToastContext'
+import { useDialog } from '../../contexts/DialogContext'
 import { addCatalogEntry } from '../../lib/itemCodeEngine'
+import ReferenceCatalogImportModal from './ReferenceCatalogImportModal'
 
 /* ------------------------------------------------------------------ */
 /*  Badge helper                                                         */
@@ -199,6 +201,7 @@ function ItemCodeConfig({ deptId }) {
 /* ------------------------------------------------------------------ */
 function ReferenceCatalog({ deptId }) {
   const { addToast } = useToast()
+  const { confirm } = useDialog()
 
   const catalog = useLiveQuery(() =>
     deptId ? db.reference_catalog.where('department_id').equals(deptId).toArray() : [],
@@ -218,6 +221,7 @@ function ReferenceCatalog({ deptId }) {
 
   const [search, setSearch] = useState('')
   const [showAdd, setShowAdd] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
   const [newComponents, setNewComponents] = useState({})
   const [newCode, setNewCode] = useState('')
   const [saving, setSaving] = useState(false)
@@ -236,7 +240,13 @@ function ReferenceCatalog({ deptId }) {
   }
 
   async function handleDelete(entry) {
-    if (!confirm('Hapus entri katalog ini?')) return
+    const isConfirmed = await confirm({
+      title: 'Hapus Entri Katalog?',
+      message: 'Apakah Anda yakin ingin menghapus entri katalog ini?',
+      danger: true,
+      confirmText: 'Hapus'
+    })
+    if (!isConfirmed) return
     await db.reference_catalog.delete(entry.id)
     addToast('Entri katalog dihapus.', 'success')
   }
@@ -263,16 +273,39 @@ function ReferenceCatalog({ deptId }) {
 
   return (
     <div>
+      {/* Import Modal */}
+      {showImportModal && (
+        <ReferenceCatalogImportModal
+          deptId={deptId}
+          onClose={() => setShowImportModal(false)}
+        />
+      )}
+
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
         <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#1f2328' }}>
           Reference Catalog{' '}
           <span style={{ fontSize: '12px', color: '#80868b', fontWeight: 400 }}>({catalog?.length || 0} entri)</span>
         </h4>
-        <button className="btn-secondary" style={{ padding: '5px 14px', fontSize: '12px' }}
-          onClick={() => setShowAdd(v => !v)}>
-          {showAdd ? 'Batal' : '+ Tambah Entri'}
-        </button>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button
+            className="btn-secondary"
+            style={{ padding: '5px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px' }}
+            onClick={() => setShowImportModal(true)}
+            title="Import banyak entri sekaligus dari file Excel"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            Import Excel
+          </button>
+          <button className="btn-secondary" style={{ padding: '5px 14px', fontSize: '12px' }}
+            onClick={() => setShowAdd(v => !v)}>
+            {showAdd ? 'Batal' : '+ Tambah Entri'}
+          </button>
+        </div>
       </div>
 
       {/* Form tambah entri */}

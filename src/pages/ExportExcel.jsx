@@ -1,90 +1,70 @@
 import { useState, useEffect } from 'react'
 import * as XLSX from 'xlsx'
-import { useNavigate } from 'react-router-dom'
 import { useToast } from '../contexts/ToastContext'
 
-const LINE_OPTIONS = [
-  { id: 'line1', label: 'Line 1' },
-  { id: 'line2', label: 'Line 2' },
-  { id: 'line3', label: 'Line 3' },
-  { id: 'line4', label: 'Line 4' },
-]
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from '../lib/db'
 
-const STANDARD_COLUMNS = [
-  'Plant', 'Location', 'Sub-Machine', 'Item Code', 'Category',
-  'Part', 'Description ( Bella )', 'Spesification', 'Warehouse Name',
-  'Status', 'Qty', 'Foto', 'Qty WH'
-]
 
-const fieldMapping = {
-  'Sub-Machine': 'subMachine',
-  'Item Code': 'itemCode',
-  'Category': 'category',
-  'Part': 'part',
-  'Description ( Bella )': 'description',
-  'Spesification': 'spesification',
-  'Warehouse Name': 'warehouseName',
-  'Status': 'status',
-  'Foto': 'foto'
-}
 
 export default function ExportExcel() {
   const [mode, setMode] = useState('per-line') // 'per-line' | 'gabungan'
-  const [selectedLine, setSelectedLine] = useState('line1')
-
-  const [isLoading, setIsLoading] = useState(true)
-  const [dataCache, setDataCache] = useState({ locations: {}, componentsByLine: {} })
+  const [selectedLine, setSelectedLine] = useState('')
   const { addToast } = useToast()
-  const navigate = useNavigate()
 
-  // 1. Fetch data ONCE on mount
+  const lines = useLiveQuery(() => db.lines_cache.toArray().then(r => r.sort((a,b) => (a.order??0)-(b.order??0))), [], [])
+  const locations = useLiveQuery(() => db.locations_cache.toArray(), [], [])
+  const records = useLiveQuery(() => db.records.filter(r => r.isDeleted !== true).toArray(), [], [])
+  const columns = useLiveQuery(() => db.columns_config.filter(c => c.applies_to !== 'reference_catalog').toArray().then(r => r.sort((a,b) => (a.order??0)-(b.order??0))), [], [])
+
+
   useEffect(() => {
-    async function fetchAllData() {
-      try {
-        // Mocked for phase 1 - removed firebase dependencies
-        const locMap = {}
-        const compsByLine = { line1: [], line2: [], line3: [], line4: [] }
-
-        setDataCache({ locations: locMap, componentsByLine: compsByLine })
-      } catch (err) {
-        console.error('Error fetching data for export:', err)
-        addToast('Gagal memuat data', 'error')
-      } finally {
-        setIsLoading(false)
-      }
+    if (lines?.length > 0 && !selectedLine) {
+      setSelectedLine(lines[0].id)
     }
-    fetchAllData()
-  }, []) // Empty dependency array = one-time fetch
+  }, [lines, selectedLine])
+
+  const LINE_OPTIONS = lines ? lines.map(l => ({ id: l.id, label: l.name })) : []
 
   // Generate Excel-friendly data array for a specific line
   const getExportDataForLine = (lineId) => {
-    const rows = dataCache.componentsByLine[lineId] || []
-    return rows.map(row => {
+    if (!locations || !records || !columns) return []
+
+    // 1. Dapatkan lokasi-lokasi di Line ini
+    const lineLocations = locations.filter(l => l.line_id === lineId)
+    const locIds = new Set(lineLocations.map(l => l.id))
+    const locMap = {}
+    lineLocations.forEach(l => locMap[l.id] = l.name)
+
+    // 2. Filter record yang berada di lokasi-lokasi tersebut
+    const lineRecords = records.filter(r => locIds.has(r.location_id))
+
+    // 3. Bangun array hasil
+    return lineRecords.map(row => {
       const rowData = {}
-
-      // Plant (Line Label)
-      rowData['Plant'] = LINE_OPTIONS.find(l => l.id === lineId)?.label || lineId
-      // Location (Real Name)
-      rowData['Location'] = dataCache.locations[row.locationId] || 'Belum Ada Lokasi'
-      // Qty
-      rowData['Qty'] = row.qty !== undefined && row.qty !== null ? row.qty : ''
-      // Qty WH
-      rowData['Qty WH'] = row.qtyWh !== undefined && row.qtyWh !== null ? row.qtyWh : ''
-
-      // Map other text fields
-      Object.entries(fieldMapping).forEach(([stdCol, camelKey]) => {
-        rowData[stdCol] = row[camelKey] || ''
+      rowData['Plant / Line'] = LINE_OPTIONS.find(l => l.id === lineId)?.label || lineId
+      rowData['Lokasi'] = locMap[row.location_id] || 'Tidak diketahui'
+      
+      // Ambil department_id dari lokasi baris ini
+      const loc = lineLocations.find(l => l.id === row.location_id)
+      const deptId = loc ? loc.department_id : null
+      
+      // Filter kolom yang berlaku untuk department ini
+      const deptCols = columns.filter(c => c.department_id === deptId)
+      
+      deptCols.forEach(col => {
+        rowData[col.label] = row.components?.[col.key] ?? ''
       })
-
+      
       return rowData
     })
   }
 
-  const createStyledSheet = (dataArray) => {
-    const ws = XLSX.utils.json_to_sheet(dataArray, { header: STANDARD_COLUMNS })
+  const createStyledSheet = (dataArray, headerKeys) => {
+    const ws = XLSX.utils.json_to_sheet(dataArray, { header: headerKeys })
 
     // Auto column width logic
-    const colWidths = STANDARD_COLUMNS.map(col => {
+    const colWidths = headerKeys.map(col => {
       let maxLen = col.length
       dataArray.forEach(row => {
         const val = row[col] !== undefined && row[col] !== null ? String(row[col]) : ''
@@ -109,13 +89,24 @@ export default function ExportExcel() {
 
     if (mode === 'per-line') {
       const dataArray = getExportDataForLine(selectedLine)
-      const ws = createStyledSheet(dataArray)
+      
+      // Ambil semua key (header) yang muncul di data (karena kolom dinamis per dept)
+      const allKeys = new Set(['Plant / Line', 'Lokasi'])
+      dataArray.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)))
+      const headerKeys = Array.from(allKeys)
+
+      const ws = createStyledSheet(dataArray, headerKeys)
       XLSX.utils.book_append_sheet(wb, ws, LINE_OPTIONS.find(l => l.id === selectedLine)?.label || selectedLine)
-      filename = `PlantSourcing_Export_${LINE_OPTIONS.find(l => l.id === selectedLine)?.label.replace(' ', '')}_${dateStr}.xlsx`
+      filename = `PlantSourcing_Export_${(LINE_OPTIONS.find(l => l.id === selectedLine)?.label || selectedLine).replace(/ /g, '')}_${dateStr}.xlsx`
     } else {
       LINE_OPTIONS.forEach(opt => {
         const dataArray = getExportDataForLine(opt.id)
-        const ws = createStyledSheet(dataArray)
+        
+        const allKeys = new Set(['Plant / Line', 'Lokasi'])
+        dataArray.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)))
+        const headerKeys = Array.from(allKeys)
+
+        const ws = createStyledSheet(dataArray, headerKeys)
         XLSX.utils.book_append_sheet(wb, ws, opt.label)
       })
       filename = `PlantSourcing_Export_Gabungan_${dateStr}.xlsx`
@@ -125,38 +116,31 @@ export default function ExportExcel() {
     addToast('File Excel berhasil diunduh', 'success')
   }
 
-  const previewRows = getExportDataForLine(mode === 'gabungan' ? 'line1' : selectedLine)
+  const previewRows = getExportDataForLine(mode === 'gabungan' ? (LINE_OPTIONS[0]?.id || '') : selectedLine)
   const totalPreviewRows = previewRows.length
   const previewData = previewRows.slice(0, 20)
+  
+  const previewHeaders = new Set(['Plant / Line', 'Lokasi'])
+  previewData.forEach(row => Object.keys(row).forEach(k => previewHeaders.add(k)))
+  const previewHeaderArray = Array.from(previewHeaders)
 
   return (
-    <div className="layout-content" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', background: 'var(--color-surface-panel)' }}>
-      {/* Header */}
-      <header className="page-header" style={{ padding: '16px 24px', background: 'var(--color-canvas)', borderBottom: '1px solid var(--color-border)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <button
-            className="btn-secondary"
-            onClick={() => navigate('/')}
-            style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="19" y1="12" x2="5" y2="12"></line>
-              <polyline points="12 19 5 12 12 5"></polyline>
-            </svg>
-          </button>
-          <div>
-            <h1 className="page-title" style={{ margin: 0, fontSize: '20px', color: 'var(--color-ink)' }}>Export Data Excel</h1>
-            <p className="page-subtitle" style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--color-ink-muted)' }}>Unduh data dari sistem ke dalam format .xlsx</p>
-          </div>
+    <div style={{ minHeight: '100%', background: 'var(--color-surface-panel)' }}>
+      <div style={{ padding: '24px 28px', maxWidth: '1200px', margin: '0 auto' }}>
+        <div style={{ marginBottom: '20px' }}>
+          <h1 style={{ margin: '0 0 4px', fontSize: '20px', fontWeight: 700, color: 'var(--color-ink)' }}>Export Data Excel</h1>
+          <p style={{ margin: 0, fontSize: '13px', color: 'var(--color-ink-muted)' }}>Unduh data dari sistem ke dalam format .xlsx</p>
         </div>
-      </header>
-
-      <main style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto', width: '100%', flex: 1, overflowY: 'auto' }}>
-        {isLoading ? (
+        {(!lines || !locations || !records || !columns) ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px', background: 'var(--color-canvas)', border: '1px solid var(--color-border)', borderRadius: '12px' }}>
             <div style={{ width: '40px', height: '40px', border: '3px solid var(--color-border)', borderTop: `3px solid var(--color-primary)`, borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-            <p style={{ marginTop: '16px', color: 'var(--color-ink-muted)' }}>Memuat data dari Firestore...</p>
+            <p style={{ marginTop: '16px', color: 'var(--color-ink-muted)' }}>Memuat data dari database lokal...</p>
             <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+          </div>
+        ) : LINE_OPTIONS.length === 0 ? (
+          <div style={{ padding: '48px', textAlign: 'center', background: 'var(--color-canvas)', border: '1px solid var(--color-border)', borderRadius: '12px' }}>
+            <h3 style={{ color: 'var(--color-ink)', margin: '0 0 8px' }}>Belum Ada Data Line</h3>
+            <p style={{ color: 'var(--color-ink-muted)', margin: 0 }}>Silakan tambahkan Line terlebih dahulu di pengaturan Hierarki.</p>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -213,8 +197,8 @@ export default function ExportExcel() {
               </div>
 
               <div style={{ padding: '12px 24px', background: 'var(--color-surface-subtle)', fontSize: '13px', color: 'var(--color-ink-muted)' }}>
-                {mode === 'gabungan' && <strong>Preview menampilkan Line 1. Hasil download akan berisi 4 sheet terpisah. </strong>}
-                Menampilkan maksimal 20 baris pertama dari {totalPreviewRows} total baris untuk {LINE_OPTIONS.find(l => l.id === (mode === 'gabungan' ? 'line1' : selectedLine))?.label}.
+                {mode === 'gabungan' && <strong>Preview menampilkan {LINE_OPTIONS[0]?.label}. Hasil download akan berisi {LINE_OPTIONS.length} sheet terpisah. </strong>}
+                Menampilkan maksimal 20 baris pertama dari {totalPreviewRows} total baris untuk {LINE_OPTIONS.find(l => l.id === (mode === 'gabungan' ? LINE_OPTIONS[0]?.id : selectedLine))?.label}.
               </div>
 
               <div style={{ overflowX: 'auto', maxHeight: '500px', borderTop: '1px solid var(--color-border)' }}>
@@ -229,7 +213,7 @@ export default function ExportExcel() {
                         <th style={{ position: 'sticky', top: 0, background: 'var(--color-surface-subtle)', padding: '8px 12px', borderBottom: '1px solid var(--color-border)', borderRight: '1px solid var(--color-border)', color: 'var(--color-ink)', fontWeight: 600, textAlign: 'center', width: '40px' }}>
                           #
                         </th>
-                        {STANDARD_COLUMNS.map((h, i) => (
+                        {previewHeaderArray.map((h, i) => (
                           <th key={i} style={{ position: 'sticky', top: 0, background: 'var(--color-surface-subtle)', padding: '8px 12px', borderBottom: '1px solid var(--color-border)', borderRight: '1px solid var(--color-border)', color: 'var(--color-ink)', fontWeight: 600, textAlign: 'left', whiteSpace: 'nowrap' }}>
                             {h}
                           </th>
@@ -242,7 +226,7 @@ export default function ExportExcel() {
                           <td style={{ padding: '6px 12px', borderRight: '1px solid var(--color-border)', color: 'var(--color-ink-muted)', textAlign: 'center' }}>
                             {rowIndex + 1}
                           </td>
-                          {STANDARD_COLUMNS.map((col, colIndex) => (
+                          {previewHeaderArray.map((col, colIndex) => (
                             <td key={colIndex} style={{ padding: '6px 12px', borderRight: '1px solid var(--color-border)', whiteSpace: 'nowrap', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                               {row[col] !== undefined && row[col] !== null ? String(row[col]) : ''}
                             </td>
@@ -256,7 +240,7 @@ export default function ExportExcel() {
             </div>
           </div>
         )}
-      </main>
+      </div>
     </div>
   )
 }

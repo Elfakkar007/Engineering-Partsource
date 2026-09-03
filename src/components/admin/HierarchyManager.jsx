@@ -1,4 +1,4 @@
-﻿/**
+/**
  * HierarchyManager.jsx
  *
  * Panel kelola hierarki Line 鈫?Department 鈫?Location 鈥?SRS v2.0 搂4
@@ -12,6 +12,7 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../../lib/db'
 import { useToast } from '../../contexts/ToastContext'
+import { useDialog } from '../../contexts/DialogContext'
 import { logActivity } from '../../lib/activityLog'
 
 /* ---- simple local ID generator ---- */
@@ -45,7 +46,7 @@ function InlineAddForm({ placeholder, onAdd, onCancel }) {
         placeholder={placeholder}
         autoFocus
         onKeyDown={e => { if (e.key === 'Enter') { onAdd(name); } if (e.key === 'Escape') onCancel() }}
-        style={{ flex: 1, padding: '6px 10px', fontSize: '13px', border: '1px solid #1a73e8', borderRadius: '6px', outline: 'none' }}
+        style={{ width: 'min(100%, 300px)', padding: '6px 10px', fontSize: '13px', border: '1px solid #1a73e8', borderRadius: '6px', outline: 'none' }}
       />
       <button className="btn-primary" style={{ padding: '6px 14px', fontSize: '12px' }} onClick={() => onAdd(name)}>Simpan</button>
       <button className="btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={onCancel}>Batal</button>
@@ -56,7 +57,7 @@ function InlineAddForm({ placeholder, onAdd, onCancel }) {
 /* ------------------------------------------------------------------ */
 /*  Lines Manager                                                        */
 /* ------------------------------------------------------------------ */
-function LinesManager({ userId }) {
+function LinesManager({ userId, confirm }) {
   const lines = useLiveQuery(() => db.lines_cache.toArray().then(r => r.sort((a,b) => (a.order??0)-(b.order??0))), [], [])
   const [adding, setAdding] = useState(false)
   const [editId, setEditId] = useState(null)
@@ -74,7 +75,13 @@ function LinesManager({ userId }) {
   }
 
   async function handleDelete(line) {
-    if (!confirm(`Hapus Line "${line.name}"? Semua data di Line ini juga akan terpengaruh.`)) return
+    const isConfirmed = await confirm({
+      title: 'Hapus Line?',
+      message: `Hapus Line "${line.name}"? Semua data di Line ini juga akan terpengaruh.`,
+      danger: true,
+      confirmText: 'Hapus'
+    })
+    if (!isConfirmed) return
     await db.lines_cache.delete(line.id)
     addToast(`Line "${line.name}" dihapus.`, 'success')
     logActivity('hapus_line', userId, { name: line.name }, 'line', line.id)
@@ -97,7 +104,7 @@ function LinesManager({ userId }) {
                 <input value={editName} onChange={e => setEditName(e.target.value)}
                   autoFocus
                   onKeyDown={e => { if (e.key === 'Enter') handleSaveEdit(line); if (e.key === 'Escape') setEditId(null) }}
-                  style={{ flex: 1, padding: '4px 8px', fontSize: '13px', border: '1px solid #1a73e8', borderRadius: '5px', outline: 'none' }} />
+                  style={{ width: 'min(100%, 300px)', padding: '4px 8px', fontSize: '13px', border: '1px solid #1a73e8', borderRadius: '5px', outline: 'none' }} />
                 <button className="btn-primary" style={{ padding: '4px 12px', fontSize: '12px' }} onClick={() => handleSaveEdit(line)}>Simpan</button>
                 <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => setEditId(null)}>Batal</button>
               </>
@@ -125,7 +132,7 @@ function LinesManager({ userId }) {
 /* ------------------------------------------------------------------ */
 /*  Departments Manager                                                  */
 /* ------------------------------------------------------------------ */
-function DepartmentsManager({ userId }) {
+function DepartmentsManager({ userId, confirm }) {
   const depts = useLiveQuery(() => db.departments_cache.toArray().then(r => r.sort((a,b) => (a.order??0)-(b.order??0))), [], [])
   const [adding, setAdding] = useState(false)
   const [editId, setEditId] = useState(null)
@@ -143,7 +150,13 @@ function DepartmentsManager({ userId }) {
   }
 
   async function handleDelete(dept) {
-    if (!confirm(`Hapus Department "${dept.name}"? Skema kolom dan data terkait akan terpengaruh.`)) return
+    const isConfirmed = await confirm({
+      title: 'Hapus Department?',
+      message: `Hapus Department "${dept.name}"? Skema kolom dan data terkait akan terpengaruh.`,
+      danger: true,
+      confirmText: 'Hapus'
+    })
+    if (!isConfirmed) return
     await db.departments_cache.delete(dept.id)
     addToast(`Department "${dept.name}" dihapus.`, 'success')
     logActivity('hapus_department', userId, { name: dept.name }, 'department', dept.id)
@@ -166,7 +179,7 @@ function DepartmentsManager({ userId }) {
                 <input value={editName} onChange={e => setEditName(e.target.value)}
                   autoFocus
                   onKeyDown={e => { if (e.key === 'Enter') handleSaveEdit(dept); if (e.key === 'Escape') setEditId(null) }}
-                  style={{ flex: 1, padding: '4px 8px', fontSize: '13px', border: '1px solid #1a73e8', borderRadius: '5px', outline: 'none' }} />
+                  style={{ width: 'min(100%, 300px)', padding: '4px 8px', fontSize: '13px', border: '1px solid #1a73e8', borderRadius: '5px', outline: 'none' }} />
                 <button className="btn-primary" style={{ padding: '4px 12px', fontSize: '12px' }} onClick={() => handleSaveEdit(dept)}>Simpan</button>
                 <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => setEditId(null)}>Batal</button>
               </>
@@ -194,7 +207,7 @@ function DepartmentsManager({ userId }) {
 /* ------------------------------------------------------------------ */
 /*  Locations Manager                                                    */
 /* ------------------------------------------------------------------ */
-function LocationsManager({ userId }) {
+function LocationsManager({ userId, confirm }) {
   const lines = useLiveQuery(() => db.lines_cache.toArray().then(r => r.sort((a,b) => (a.order??0)-(b.order??0))), [], [])
   const depts = useLiveQuery(() => db.departments_cache.toArray().then(r => r.sort((a,b) => (a.order??0)-(b.order??0))), [], [])
   const locations = useLiveQuery(() => db.locations_cache.toArray(), [], [])
@@ -214,19 +227,28 @@ function LocationsManager({ userId }) {
   )
 
   async function handleAdd() {
-    if (!newName.trim() || !newLine || !newDept) {
+    const finalLine = filterLine || newLine
+    const finalDept = filterDept || newDept
+
+    if (!newName.trim() || !finalLine || !finalDept) {
       addToast('Isi nama, line, dan department terlebih dahulu.', 'error'); return
     }
     const id = localId()
-    const maxOrder = Math.max(0, ...(locations || []).filter(l => l.line_id === newLine && l.department_id === newDept).map(l => l.order || 0))
-    await db.locations_cache.add({ id, name: newName.trim(), line_id: newLine, department_id: newDept, order: maxOrder + 1 })
+    const maxOrder = Math.max(0, ...(locations || []).filter(l => l.line_id === finalLine && l.department_id === finalDept).map(l => l.order || 0))
+    await db.locations_cache.add({ id, name: newName.trim(), line_id: finalLine, department_id: finalDept, order: maxOrder + 1 })
     addToast(`Lokasi "${newName}" ditambahkan.`, 'success')
     logActivity('tambah_lokasi', userId, { name: newName }, 'location', id)
     setAdding(false); setNewName(''); setNewLine(''); setNewDept('')
   }
 
   async function handleDelete(loc) {
-    if (!confirm(`Hapus Lokasi "${loc.name}"?`)) return
+    const isConfirmed = await confirm({
+      title: 'Hapus Lokasi?',
+      message: `Hapus Lokasi "${loc.name}"?`,
+      danger: true,
+      confirmText: 'Hapus'
+    })
+    if (!isConfirmed) return
     await db.locations_cache.delete(loc.id)
     addToast(`Lokasi "${loc.name}" dihapus.`, 'success')
   }
@@ -267,7 +289,7 @@ function LocationsManager({ userId }) {
                 <>
                   <input value={editName} onChange={e => setEditName(e.target.value)} autoFocus
                     onKeyDown={e => { if (e.key === 'Enter') handleSaveEdit(loc); if (e.key === 'Escape') setEditId(null) }}
-                    style={{ flex: 1, padding: '4px 8px', fontSize: '12px', border: '1px solid #1a73e8', borderRadius: '4px', outline: 'none' }} />
+                    style={{ width: 'min(100%, 300px)', padding: '4px 8px', fontSize: '12px', border: '1px solid #1a73e8', borderRadius: '4px', outline: 'none' }} />
                   <button className="btn-primary" style={{ padding: '3px 10px', fontSize: '11px' }} onClick={() => handleSaveEdit(loc)}>Simpan</button>
                   <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '11px' }} onClick={() => setEditId(null)}>Batal</button>
                 </>
@@ -291,19 +313,26 @@ function LocationsManager({ userId }) {
       {/* Add Location Form */}
       {adding ? (
         <div style={{ marginTop: '12px', padding: '12px', background: '#f0f7ff', borderRadius: '8px', border: '1px solid #c2d7f7' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '10px' }}>
-            <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Nama Lokasi"
-              style={{ padding: '6px 8px', fontSize: '12px', border: '1px solid #dadce0', borderRadius: '5px' }} />
-            <select value={newLine} onChange={e => setNewLine(e.target.value)}
-              style={{ padding: '6px 8px', fontSize: '12px', border: '1px solid #dadce0', borderRadius: '5px' }}>
-              <option value="">Pilih Line</option>
-              {(lines || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </select>
-            <select value={newDept} onChange={e => setNewDept(e.target.value)}
-              style={{ padding: '6px 8px', fontSize: '12px', border: '1px solid #dadce0', borderRadius: '5px' }}>
-              <option value="">Pilih Department</option>
-              {(depts || []).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px', marginBottom: '10px' }}>
+            <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Nama Lokasi" autoFocus
+              onKeyDown={e => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') setAdding(false) }}
+              style={{ padding: '6px 8px', fontSize: '12px', border: '1px solid #dadce0', borderRadius: '5px', width: '100%' }} />
+            
+            {!filterLine && (
+              <select value={newLine} onChange={e => setNewLine(e.target.value)}
+                style={{ padding: '6px 8px', fontSize: '12px', border: '1px solid #dadce0', borderRadius: '5px', width: '100%' }}>
+                <option value="">Pilih Line</option>
+                {(lines || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            )}
+            
+            {!filterDept && (
+              <select value={newDept} onChange={e => setNewDept(e.target.value)}
+                style={{ padding: '6px 8px', fontSize: '12px', border: '1px solid #dadce0', borderRadius: '5px', width: '100%' }}>
+                <option value="">Pilih Department</option>
+                {(depts || []).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            )}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button className="btn-primary" style={{ padding: '5px 14px', fontSize: '12px' }} onClick={handleAdd}>Simpan</button>
@@ -321,11 +350,12 @@ function LocationsManager({ userId }) {
 /*  Main Component                                                       */
 /* ------------------------------------------------------------------ */
 export default function HierarchyManager({ userId = '' }) {
+  const { confirm } = useDialog()
   return (
     <div>
-      <LinesManager userId={userId} />
-      <DepartmentsManager userId={userId} />
-      <LocationsManager userId={userId} />
+      <LinesManager userId={userId} confirm={confirm} />
+      <DepartmentsManager userId={userId} confirm={confirm} />
+      <LocationsManager userId={userId} confirm={confirm} />
     </div>
   )
 }

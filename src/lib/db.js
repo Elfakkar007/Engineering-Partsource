@@ -111,3 +111,29 @@ db.version(5).stores({
     console.log('[db v5 upgrade] reference_catalog clear gagal (mungkin tabel kosong), lanjut.')
   }
 })
+
+/**
+ * Schema v6.0 — Compound Index pada locations_cache
+ *
+ * Bug fix (SRS v2.0 §4): query locations di NavigationContext sebelumnya hanya
+ * memfilter berdasarkan `department_id` tanpa memperhatikan `line_id`, sehingga
+ * lokasi dari semua Line muncul sekaligus — menyebabkan data records lintas Line
+ * tampil di Line yang salah.
+ *
+ * Perbaikan: tambahkan compound index `[line_id+department_id]` agar query bisa
+ * memfilter lokasi berdasarkan Line DAN Department sekaligus secara efisien.
+ * Tidak ada migrasi data yang diperlukan (hanya penambahan index).
+ */
+db.version(6).stores({
+  columns_config: '++id, department_id, key, order',
+  records: '++id, location_id, department_id, import_batch_id, sync_status, isDeleted, item_code_mode, lastUpdated',
+  sync_queue: '++id, entity_type, entity_id, operation, status, created_at, retry_count',
+  reference_catalog: '++id, department_id, search_key',
+  lines_cache: 'id',
+  departments_cache: 'id',
+  locations_cache: 'id, line_id, department_id, [line_id+department_id]',
+  import_batches: '++id, location_id, department_id, imported_at, status',
+  activity_log: '++id, user_id, action, entity_type, timestamp',
+  completion_exception_rules: '++id, department_id, condition_column_key',
+  app_settings: 'key',
+})

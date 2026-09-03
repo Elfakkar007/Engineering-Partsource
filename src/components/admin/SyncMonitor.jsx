@@ -16,6 +16,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../../lib/db'
 import { triggerSync, retryFailedItems } from '../../lib/syncWorker'
 import { useToast } from '../../contexts/ToastContext'
+import { useDialog } from '../../contexts/DialogContext'
 
 const STATUS_STYLES = {
   pending:  { bg: '#fef7e0', color: '#b06000', label: 'Menunggu' },
@@ -26,6 +27,7 @@ const STATUS_STYLES = {
 
 export default function SyncMonitor() {
   const { addToast } = useToast()
+  const { confirm } = useDialog()
   const [syncing, setSyncing] = useState(false)
   const [retrying, setRetrying] = useState(false)
 
@@ -69,8 +71,14 @@ export default function SyncMonitor() {
     }
   }
 
-  async function handleDeleteEntry(id) {
-    if (!confirm('Hapus entri ini dari antrian? Data tidak akan dikirim ke server.')) return
+  async function handleRemove(id) {
+    const isConfirmed = await confirm({
+      title: 'Hapus Antrian Sync?',
+      message: 'Hapus entri ini dari antrian? Data tidak akan dikirim ke server.',
+      danger: true,
+      confirmText: 'Hapus'
+    })
+    if (!isConfirmed) return
     await db.sync_queue.delete(id)
   }
 

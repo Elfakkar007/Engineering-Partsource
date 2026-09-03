@@ -31,6 +31,7 @@ import {
   extractUniqueValues,
   NEW_COLUMN_SENTINEL,
 } from '../../lib/excelEngine'
+import { useDialog } from '../../contexts/DialogContext'
 import { generateColumnKey } from '../../hooks/useDynamicSchema'
 import { createImportBatch } from '../../lib/importUndo'
 import { db } from '../../lib/db'
@@ -166,6 +167,7 @@ export default function ImportModal({
   onClose,
   onImported,
 }) {
+  const { alert } = useDialog()
   const [step, setStep] = useState(1)
   const [file, setFile] = useState(null)
   const [parsing, setParsing] = useState(false)
@@ -346,7 +348,8 @@ export default function ImportModal({
       if (typeof onImported === 'function') onImported({ batchId, rowCount: rowsToInsert.length })
       setStep(4)
     } catch (err) {
-      alert('Gagal mengimpor: ' + err.message)
+      console.error('Import process failed:', err)
+      alert({ title: 'Gagal Impor', message: 'Gagal mengimpor: ' + err.message, danger: true })
     } finally {
       setCommitting(false)
     }

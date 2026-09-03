@@ -17,6 +17,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../../lib/db'
 import { useDynamicSchema, generateColumnKey } from '../../hooks/useDynamicSchema'
 import { useToast } from '../../contexts/ToastContext'
+import { useDialog } from '../../contexts/DialogContext'
 import { logActivity } from '../../lib/activityLog'
 
 const TYPE_OPTIONS = [
@@ -278,6 +279,7 @@ export default function SchemaBuilder({ userId = '' }) {
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingColId, setEditingColId] = useState(null)
   const { addToast } = useToast()
+  const { confirm } = useDialog()
 
   const effectiveDeptId = activeDeptId || departments?.[0]?.id || null
   const { allColumns, isLoading, updateColumn, removeColumn, reorderColumns } = useDynamicSchema(effectiveDeptId)
@@ -292,15 +294,25 @@ export default function SchemaBuilder({ userId = '' }) {
     addToast(`Kolom "${col.label}" ${col.is_visible === false ? 'ditampilkan' : 'disembunyikan'}.`, 'success')
   }
 
+  async function handlePermanentDeleteCol(col) {
+    const isConfirmed = await confirm({
+      title: 'Hapus Permanen Kolom?',
+      message: `Hapus permanen kolom "${col.label}"? Data di sel kolom ini akan kehilangan kunci dan tidak bisa dipulihkan.`,
+      danger: true,
+      confirmText: 'Hapus Permanen'
+    })
+    if (!isConfirmed) return
+    await removeColumn(col.id, { hard: true })
+    addToast(`Kolom "${col.label}" dihapus.`, 'success')
+    logActivity('hapus_kolom', userId, { label: col.label, key: col.key }, 'columns_config', col.id)
+  }
+
   async function handleDelete(col) {
     if (col.is_ref_trigger) {
       addToast('Tidak bisa menghapus kolom Ref Trigger. Nonaktifkan flag terlebih dahulu.', 'error')
       return
     }
-    if (!confirm(`Hapus permanen kolom "${col.label}"? Data di sel kolom ini akan kehilangan kunci dan tidak bisa dipulihkan.`)) return
-    await removeColumn(col.id, { hard: true })
-    addToast(`Kolom "${col.label}" dihapus.`, 'success')
-    logActivity('hapus_kolom', userId, { label: col.label, key: col.key }, 'columns_config', col.id)
+    await handlePermanentDeleteCol(col)
   }
 
   async function handleSaveEdit(col, changes) {
